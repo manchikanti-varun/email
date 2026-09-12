@@ -1,0 +1,36 @@
+{
+  "name": "email-health-platform",
+  "version": "1.0.0",
+  "description": "Intelligent Email List Health & Deliverability Platform (MVP)",
+  "main": "server/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "benchmark": "node server/benchmark.js"
+  },
+  "keywords": [
+    "email",
+    "verification",
+    "deliverability",
+    "list-health"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.3.0",
+    "nanoid": "^5.0.7",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "MailHealth",
+  "short_name": "MailHealth",
+  "description": "Email List Health & Deliverability Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1420",
+  "theme_color": "#0f1420",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

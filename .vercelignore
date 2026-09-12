@@ -1,0 +1,11 @@
+# Vercel hosts only the static frontend (public/). Keep the backend out.
+server
+data
+node_modules
+benchmark
+*.db
+*.db-shm
+*.db-wal
+.env
+setup-vps.sh
+railway.json

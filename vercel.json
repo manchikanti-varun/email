@@ -1,0 +1,23 @@
+{
+  "buildCommand": "node scripts/build-frontend.mjs",
+  "outputDirectory": "public",
+  "framework": null,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/((?!config.js|app.js|api.js|ui.js|styles.css|favicon.svg|manifest.webmanifest|robots.txt).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/config.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    }
+  ]
+}
