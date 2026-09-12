@@ -21,17 +21,6 @@
   <meta property="og:site_name" content="MailHealth" />
 
   <link rel="stylesheet" href="/styles.css" />
-
-  <!-- Apply saved theme before paint to avoid a flash of the wrong theme. -->
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem('mh-theme');
-        if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', t);
-      } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
-    })();
-  </script>
 </head>
 <body>
   <div id="app"></div>

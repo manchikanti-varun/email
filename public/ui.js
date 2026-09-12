@@ -15,22 +15,7 @@ export function esc(s) {
 export function toast(msg) {
   const el = h(`<div class="toast">${esc(msg)}</div>`);
   document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(12px)'; el.style.transition = 'opacity .25s, transform .25s'; }, 2350);
-  setTimeout(() => el.remove(), 2650);
-}
-
-// ---- Theme (light/dark) ----
-export function getTheme() {
-  return document.documentElement.getAttribute('data-theme') || 'dark';
-}
-export function toggleTheme() {
-  const next = getTheme() === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem('mh-theme', next); } catch { /* ignore */ }
-  return next;
-}
-export function themeIcon(theme = getTheme()) {
-  return theme === 'dark' ? '☀' : '☾';
+  setTimeout(() => el.remove(), 2600);
 }
 
 // Inline SVG icons for the sidebar nav, keyed by route.
