@@ -15,7 +15,47 @@ export function esc(s) {
 export function toast(msg) {
   const el = h(`<div class="toast">${esc(msg)}</div>`);
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(12px)'; el.style.transition = 'opacity .25s, transform .25s'; }, 2350);
+  setTimeout(() => el.remove(), 2650);
+}
+
+// ---- Theme (light/dark) ----
+export function getTheme() {
+  return document.documentElement.getAttribute('data-theme') || 'dark';
+}
+export function toggleTheme() {
+  const next = getTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('mh-theme', next); } catch { /* ignore */ }
+  return next;
+}
+export function themeIcon(theme = getTheme()) {
+  return theme === 'dark' ? '☀' : '☾';
+}
+
+// Inline SVG icons for the sidebar nav, keyed by route.
+const NAV_ICONS = {
+  dashboard: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>',
+  lists: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1.2"/><circle cx="3.5" cy="12" r="1.2"/><circle cx="3.5" cy="18" r="1.2"/></svg>',
+  single: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>',
+  alerts: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  integrations: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
+  api: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+};
+export function navIcon(route) {
+  return `<span class="nav-ic">${NAV_ICONS[route] || ''}</span>`;
+}
+
+// Skeleton placeholder markup for loading states.
+export function skeletonCards(n = 4) {
+  return `<div class="grid cols-4" style="margin-bottom:24px">${
+    Array.from({ length: n }, () => '<div class="card"><div class="skeleton skeleton-line short"></div><div class="skeleton skeleton-line" style="width:60%;height:26px"></div></div>').join('')
+  }</div><div class="skeleton skeleton-card"></div>`;
+}
+export function skeletonRows(n = 4) {
+  return Array.from({ length: n }, () =>
+    '<div class="card" style="margin-bottom:12px"><div class="skeleton skeleton-line" style="width:45%"></div><div class="skeleton skeleton-line short" style="margin-bottom:0"></div></div>'
+  ).join('');
 }
 
 export function scoreColor(score) {

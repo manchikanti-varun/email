@@ -1,6 +1,7 @@
 import { api, setToken, setUnauthorizedHandler } from './api.js';
 import { h, esc, toast, scoreRing, metricBar, badge, signalRow, scoreColor, lineChart, stackedBar,
-  actionBadge, deliverabilityLabel, confidenceLabel, riskChips } from './ui.js';
+  actionBadge, deliverabilityLabel, confidenceLabel, riskChips,
+  toggleTheme, themeIcon, navIcon, skeletonCards, skeletonRows } from './ui.js';
 
 const app = document.getElementById('app');
 let state = { user: null, route: 'dashboard', param: null };
@@ -50,6 +51,8 @@ function renderAuth(mode) {
   ];
   const card = h(`
     <div class="landing">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle light or dark theme"
+        style="position:fixed;top:20px;right:20px;z-index:10">${themeIcon()}</button>
       <section class="hero">
         <h1 class="brand-lg" style="font-size:34px">Mail<span>Health</span></h1>
         <p class="hero-lead">Know which emails are safe to send — and why.</p>
@@ -80,6 +83,8 @@ function renderAuth(mode) {
     </div>`);
   app.appendChild(card);
 
+  const themeBtn = card.querySelector('#themeToggle');
+  themeBtn.onclick = () => { const next = toggleTheme(); themeBtn.textContent = themeIcon(next); };
   card.querySelector('#switch').onclick = () => renderAuth(isLogin ? 'register' : 'login');
   const submit = card.querySelector('#submit');
   const err = card.querySelector('#err');
@@ -123,12 +128,15 @@ function renderShell() {
       <aside class="sidebar">
         <div class="brand">Mail<span>Health</span></div>
         <nav class="nav">
-          ${nav.map(([r, label]) => `<a data-r="${r}" class="${state.route === r ? 'active' : ''}">${label}</a>`).join('')}
+          ${nav.map(([r, label]) => `<a data-r="${r}" class="${state.route === r ? 'active' : ''}">${navIcon(r)}<span>${label}</span></a>`).join('')}
         </nav>
         <div class="sidebar-footer">
-          <div class="credits-badge">Credits<br><b id="credits">${u.credits.toLocaleString()}</b></div>
-          <div style="margin-top:10px" class="muted">${esc(u.email)}</div>
-          <button class="btn ghost sm" id="logout" style="margin-top:10px;width:100%">Log out</button>
+          <div class="credits-badge">Credits<b id="credits">${u.credits.toLocaleString()}</b></div>
+          <div style="margin-top:10px" class="muted" title="${esc(u.email)}">${esc(u.email)}</div>
+          <div class="footer-row">
+            <button class="btn ghost sm" id="logout">Log out</button>
+            <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle light or dark theme">${themeIcon()}</button>
+          </div>
         </div>
       </aside>
       <main class="main" id="main"></main>
@@ -141,6 +149,8 @@ function renderShell() {
   shell.querySelector('#logout').onclick = async () => {
     await api.logout(); setToken(null); state.user = null; location.hash = ''; renderAuth('login');
   };
+  const themeBtn = shell.querySelector('#themeToggle');
+  themeBtn.onclick = () => { const next = toggleTheme(); themeBtn.textContent = themeIcon(next); };
 
   const main = shell.querySelector('#main');
   const views = {
@@ -193,7 +203,7 @@ function refreshCredits() {
 
 // ================= DASHBOARD =================
 async function viewDashboard(main) {
-  main.innerHTML = `<h1 class="page-title">Dashboard</h1><p class="page-sub">Upload a list to analyze its deliverability health.</p><div id="content"><p class="muted">Loading…</p></div>`;
+  main.innerHTML = `<h1 class="page-title">Dashboard</h1><p class="page-sub">Upload a list to analyze its deliverability health.</p><div id="content">${skeletonCards()}</div>`;
   const { lists } = await api.lists();
   const content = main.querySelector('#content');
 
@@ -264,7 +274,7 @@ async function startVerification(listId, total) {
 
 // ================= LISTS =================
 async function viewLists(main) {
-  main.innerHTML = `<h1 class="page-title">Lists</h1><p class="page-sub">All your uploaded email databases.</p><div id="content"><p class="muted">Loading…</p></div>`;
+  main.innerHTML = `<h1 class="page-title">Lists</h1><p class="page-sub">All your uploaded email databases.</p><div id="content">${skeletonRows()}</div>`;
   const { lists } = await api.lists();
   const content = main.querySelector('#content');
   if (!lists.length) {
@@ -471,7 +481,7 @@ function riskSummary(riskSignals) {
 
 function showContactModal(c) {
   const modal = h(`
-    <div class="auth-wrap" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50">
+    <div class="auth-wrap modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50">
       <div class="auth-card" style="max-width:560px">
         <div class="toolbar"><h3 style="margin:0" class="email-cell">${esc(c.email)}</h3><div class="spacer"></div>
           ${actionBadge(c.recommendedAction || c.classification)}</div>
@@ -555,7 +565,7 @@ function renderHistoryWithChart(history) {
 
 function showScheduleModal(id) {
   const modal = h(`
-    <div class="auth-wrap" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50">
+    <div class="auth-wrap modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50">
       <div class="auth-card" style="max-width:420px">
         <h3 style="margin-top:0">Schedule re-verification</h3>
         <p class="muted">Automatically re-verify this list on a recurring interval to track health over time.</p>
