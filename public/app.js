@@ -163,7 +163,7 @@ function renderShell() {
 async function showVerificationBanner(main) {
   try {
     const { verification: v } = await api.health();
-    if (!v || v.mode === 'live-smtp' || v.mode === 'external-provider') return; // real
+    if (!v || v.mode === 'live-smtp' || v.mode === 'smtp-worker' || v.mode === 'external-provider') return; // real
     const existing = document.getElementById('verifyBanner');
     if (existing) return;
     const banner = h(`

@@ -19,6 +19,8 @@ import { SqliteAgentAuditRepository } from './infrastructure/persistence/sqlite/
 // Infrastructure — verification gateways
 import { NodeDnsResolver } from './infrastructure/verification/node-dns-resolver.js';
 import { SocketSmtpProbe } from './infrastructure/verification/socket-smtp-probe.js';
+import { RemoteSmtpProbe } from './infrastructure/verification/remote-smtp-probe.js';
+import { SmtpRouter } from './infrastructure/verification/smtp-router.js';
 import { selectProvider } from './infrastructure/verification/providers.js';
 import { loadFeeds } from './infrastructure/verification/feed-loader.js';
 
@@ -78,7 +80,26 @@ export function createContainer() {
   // --- Verification gateways + engine ------------------------------------
   const referenceData = new ReferenceData();
   const dnsResolver = new NodeDnsResolver();
-  const smtpProbe = new SocketSmtpProbe(config.smtp);
+
+  // SMTP capability is a ROUTER over two adapters: a local socket probe (needs
+  // outbound port 25 on this host) and a remote MailHealth SMTP worker (runs
+  // where port 25 is open). The engine only sees the router. This is what lets
+  // the main app run on hosts that block port 25 without any third-party API.
+  const localSmtpProbe = new SocketSmtpProbe({ ...config.smtp, from: config.smtp.from });
+  const remoteSmtpProbe = new RemoteSmtpProbe({
+    url: config.smtpWorker.url,
+    secret: config.smtpWorker.secret,
+    timeoutMs: config.smtpWorker.timeoutMs,
+    maxRetries: config.smtpWorker.maxRetries,
+    from: config.smtp.from,
+  });
+  const smtpProbe = new SmtpRouter({
+    mode: config.smtp.enabled ? config.smtp.mode : 'disabled',
+    local: localSmtpProbe,
+    remote: remoteSmtpProbe,
+    log: (m) => { if (!config.isProd) console.log(JSON.stringify({ t: new Date().toISOString(), scope: 'smtp-router', ...m })); },
+  });
+
   const provider = selectProvider(process.env);
   const verificationEngine = new VerificationEngine({
     dnsResolver, smtpProbe, getProvider: () => provider, referenceData,
@@ -168,6 +189,9 @@ export function createContainer() {
   const verifyCapability = {
     liveSmtp: null,
     smtpDetail: 'checking…',
+    smtpMode: config.smtp.enabled ? config.smtp.mode : 'disabled',
+    smtpSource: null,               // 'local-smtp' | 'smtp-worker' | 'none'
+    workerConfigured: !!config.smtpWorker.url,
     provider: provider.name,
     realProvider: provider.name !== 'none',
   };

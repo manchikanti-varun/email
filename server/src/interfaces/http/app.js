@@ -68,9 +68,14 @@ export function buildApp(container) {
         liveSmtp: verifyCapability.liveSmtp,
         provider: verifyCapability.provider,
         realProvider: verifyCapability.realProvider,
-        mode: verifyCapability.liveSmtp
-          ? 'live-smtp'
-          : (verifyCapability.realProvider ? 'external-provider' : 'local-only'),
+        smtpMode: verifyCapability.smtpMode,
+        smtpSource: verifyCapability.smtpSource,
+        workerConfigured: verifyCapability.workerConfigured,
+        mode: verifyCapability.smtpSource === 'smtp-worker'
+          ? 'smtp-worker'
+          : (verifyCapability.liveSmtp
+            ? 'live-smtp'
+            : (verifyCapability.realProvider ? 'external-provider' : 'local-only')),
         detail: verifyCapability.smtpDetail,
       },
     }));

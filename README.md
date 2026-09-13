@@ -12,6 +12,7 @@ should be removed or reviewed, and **exactly why**.
 - [Architecture](docs/ARCHITECTURE.md) — the clean-architecture layout of the server.
 - [Deployment](docs/DEPLOY.md) — deploying to Railway, Vercel, or a VPS.
 - [MailHealth AI Agent](docs/AGENT.md) — the optional AI operator that investigates list health and performs approved actions on top of the deterministic engine.
+- [SMTP Worker](docs/SMTP-WORKER.md) — MailHealth's self-owned SMTP verification. The main app needs no outbound port 25; a dedicated worker does the mailbox probing. No third-party verification API required.
 
 ## Features (MVP scope)
 

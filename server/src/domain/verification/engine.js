@@ -169,8 +169,9 @@ export class VerificationEngine {
         'The domain has no MX records; mail may still be accepted via its A record but this is less reliable.'));
     }
 
-    // STEP 6 — SMTP MAILBOX PROBE
+    // STEP 6 — SMTP MAILBOX PROBE (via the SMTP router: local or worker)
     const smtp = await this.smtp.check(email, dnsResult.mxHosts);
+    const smtpSource = smtp.source || (smtp.skipped ? 'none' : null);
     let catchAll = false;
     let smtpProbed = false;
     let smtpUnavailable = false;
@@ -259,6 +260,7 @@ export class VerificationEngine {
       recommendation: recommendationText({ deliverability, confidence, recommendedAction, facts }),
       greylisted,
       provider: provider?.provider || null,
+      smtpSource,
     });
   }
 }
@@ -373,6 +375,9 @@ function finalize(email, r) {
     signals: r.evidence || [],
     greylisted: r.greylisted || false,
     provider: r.provider || null,
+    // Which SMTP path produced the evidence: 'local-smtp' | 'smtp-worker' |
+    // 'none'. Additive/transparency field; kept in the evidence trail.
+    smtpSource: r.smtpSource || null,
     verified_at: new Date().toISOString(),
   };
 }

@@ -26,19 +26,23 @@ export function start() {
     smtpProbe.selfTest().then((r) => {
       verifyCapability.liveSmtp = r.available;
       verifyCapability.smtpDetail = r.detail;
+      verifyCapability.smtpSource = r.source || 'none';
       console.log('\n  ── Verification capability ──');
-      if (r.available) {
-        console.log('  ✓ LIVE SMTP verification is WORKING — results are real (mailbox-level).');
+      if (r.available && r.source === 'smtp-worker') {
+        console.log('  ✓ SMTP verification via MailHealth WORKER — results are real (mailbox-level).');
+        console.log(`  • ${r.detail}`);
+      } else if (r.available) {
+        console.log('  ✓ LIVE SMTP verification is WORKING (local port 25) — results are real (mailbox-level).');
       } else if (verifyCapability.realProvider) {
         console.log(`  ✓ Using external provider "${verifyCapability.provider}" for mailbox confirmation.`);
         console.log(`  • Live SMTP unavailable: ${r.detail}`);
       } else {
-        console.log('  ! Live SMTP is NOT available and no provider is configured.');
+        console.log('  ! SMTP verification is NOT available here.');
         console.log(`    Reason: ${r.detail}`);
-        console.log('    → Mailbox existence CANNOT be confirmed here. Addresses that pass');
+        console.log('    → Mailbox existence CANNOT be confirmed. Addresses that pass');
         console.log('      syntax/DNS/MX will be reported as "unknown", not "safe".');
-        console.log('    → For real results: run on a host with outbound port 25 open and set');
-        console.log('      SMTP_ENABLED=true, or configure a provider (ZEROBOUNCE_API_KEY).');
+        console.log('    → Fix: deploy the SMTP worker (smtp-worker/) on a host with outbound');
+        console.log('      port 25 open and set SMTP_WORKER_URL + SMTP_WORKER_SECRET here.');
       }
       console.log('');
     });

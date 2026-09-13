@@ -1,0 +1,19 @@
+{
+  "name": "mailhealth-smtp-worker",
+  "version": "1.0.0",
+  "description": "MailHealth SMTP verification worker — performs recipient-MX SMTP probes where outbound port 25 is permitted.",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "license": "MIT"
+}

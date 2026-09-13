@@ -68,6 +68,19 @@ export const config = {
     enabled: bool(process.env.SMTP_ENABLED, true),
     from: process.env.SMTP_FROM || 'verify@example.com',
     timeoutMs: parseInt(process.env.SMTP_TIMEOUT_MS || '8000', 10),
+    // SMTP routing mode: 'auto' (default) tries local port 25 and falls back to
+    // the MailHealth SMTP worker; 'local' uses only the local socket probe;
+    // 'remote' always uses the worker; 'disabled' performs no SMTP probing.
+    // The main app does NOT require outbound port 25 in 'remote'/'auto'-with-worker.
+    mode: (process.env.SMTP_MODE || 'auto').toLowerCase(),
+  },
+  // MailHealth-owned SMTP verification worker (see smtp-worker/). Runs where
+  // outbound port 25 is permitted. No third-party verification API involved.
+  smtpWorker: {
+    url: (process.env.SMTP_WORKER_URL || '').replace(/\/$/, ''),
+    secret: process.env.SMTP_WORKER_SECRET || '',
+    timeoutMs: parseInt(process.env.SMTP_WORKER_TIMEOUT_MS || '12000', 10),
+    maxRetries: parseInt(process.env.SMTP_WORKER_MAX_RETRIES || '1', 10),
   },
   verifyConcurrency: parseInt(process.env.VERIFY_CONCURRENCY || '5', 10),
   bodyLimit: process.env.BODY_LIMIT || '2mb',
@@ -128,6 +141,18 @@ export function assertProductionConfig() {
   // SameSite=None, which browsers only honour when the cookie is also Secure.
   if (config.cookie.sameSite.toLowerCase() === 'none' && !config.cookie.secure) {
     problems.push('COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers reject insecure SameSite=None cookies).');
+  }
+  // If a worker URL is configured, it must be HTTPS and carry a strong secret.
+  if (config.smtpWorker.url) {
+    if (!/^https:\/\//i.test(config.smtpWorker.url)) {
+      console.warn('  [warn] SMTP_WORKER_URL is not HTTPS; worker traffic (incl. the bearer secret) would be sent in the clear.');
+    }
+    if (!config.smtpWorker.secret || config.smtpWorker.secret.length < 24) {
+      problems.push('SMTP_WORKER_SECRET must be set to a strong value (>= 24 chars) when SMTP_WORKER_URL is configured.');
+    }
+  }
+  if (config.smtp.mode === 'remote' && !config.smtpWorker.url) {
+    problems.push('SMTP_MODE=remote requires SMTP_WORKER_URL to be set.');
   }
   if (problems.length) {
     console.error('\n  Refusing to start — insecure production configuration:');
