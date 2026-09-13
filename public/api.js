@@ -88,4 +88,9 @@ export const api = {
   testWebhooks: () => request('POST', '/integrations/webhooks/test'),
   alerts: () => request('GET', '/integrations/alerts'),
   markAlertsRead: () => request('POST', '/integrations/alerts/read'),
+
+  // MailHealth AI agent
+  agentChat: (payload) => request('POST', '/agent/chat', payload),
+  agentHistory: (conversationId) =>
+    request('GET', '/agent/history' + (conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : '')),
 };

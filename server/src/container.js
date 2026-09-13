@@ -14,6 +14,7 @@ import { SqliteJobRepository } from './infrastructure/persistence/sqlite/job-rep
 import { SqliteWebhookRepository } from './infrastructure/persistence/sqlite/webhook-repository.js';
 import { SqliteAlertRepository } from './infrastructure/persistence/sqlite/alert-repository.js';
 import { SqliteScheduleRepository } from './infrastructure/persistence/sqlite/schedule-repository.js';
+import { SqliteAgentAuditRepository } from './infrastructure/persistence/sqlite/agent-audit-repository.js';
 
 // Infrastructure — verification gateways
 import { NodeDnsResolver } from './infrastructure/verification/node-dns-resolver.js';
@@ -46,6 +47,15 @@ import { CampaignPreflight } from './application/campaign-use-cases.js';
 import {
   ListWebhooks, AddWebhook, DeleteWebhook, TestWebhooks, ListAlerts, MarkAlertsRead,
 } from './application/integration-use-cases.js';
+import {
+  GetAccountCredits, GetListSummary, GetFilteredContacts, EstimateVerificationCost,
+} from './application/agent-support-use-cases.js';
+import { AgentChat, AgentHistory } from './application/agent-use-cases.js';
+
+// AI agent runtime (optional intelligence/orchestration layer)
+import { AiProvider } from '../agent/provider.js';
+import { registry as toolRegistry } from '../agent/tools.js';
+import { MailHealthAgent } from '../agent/agent.js';
 
 // Interface glue
 import { makeAuthMiddleware, makeCookieHelpers } from './interfaces/http/middleware.js';
@@ -63,6 +73,7 @@ export function createContainer() {
   const webhooksRepo = new SqliteWebhookRepository(db);
   const alerts = new SqliteAlertRepository(db);
   const schedules = new SqliteScheduleRepository(db);
+  const agentAudit = new SqliteAgentAuditRepository(db);
 
   // --- Verification gateways + engine ------------------------------------
   const referenceData = new ReferenceData();
@@ -119,6 +130,12 @@ export function createContainer() {
 
     campaignPreflight: new CampaignPreflight({ lists, contacts }),
 
+    // Agent-support reads (reuse existing repos; no verification logic here)
+    getAccountCredits: new GetAccountCredits({ users }),
+    getListSummary: new GetListSummary({ lists }),
+    getFilteredContacts: new GetFilteredContacts({ lists, contacts }),
+    estimateVerificationCost: new EstimateVerificationCost({ lists, contacts, users }),
+
     listWebhooks: new ListWebhooks({ webhooks: webhooksRepo }),
     addWebhook: new AddWebhook({ webhooks: webhooksRepo }),
     deleteWebhook: new DeleteWebhook({ webhooks: webhooksRepo }),
@@ -126,6 +143,22 @@ export function createContainer() {
     listAlerts: new ListAlerts({ alerts }),
     markAlertsRead: new MarkAlertsRead({ alerts }),
   };
+
+  // --- AI Agent (optional) ------------------------------------------------
+  // The agent orchestrates the EXISTING use-cases above; it never re-implements
+  // verification. The tool context exposes the wired use-cases and the current
+  // user id. Everything is off unless config.ai.enabled is true.
+  const aiProvider = new AiProvider(config.ai);
+  const agent = new MailHealthAgent({
+    config,
+    provider: aiProvider,
+    registry: toolRegistry,
+    audit: agentAudit,
+    // Factory: per-request tool execution context bound to the current user.
+    toolContextFactory: (user) => ({ userId: user.id, useCases, config }),
+  });
+  useCases.agentChat = new AgentChat({ agent });
+  useCases.agentHistory = new AgentHistory({ audit: agentAudit });
 
   // --- Interface glue -----------------------------------------------------
   const authRequired = makeAuthMiddleware({ users, tokenService, apiKeyService });
@@ -151,7 +184,10 @@ export function createContainer() {
     useCases,
     authRequired,
     cookies,
+    agent,
     // convenience for boot logging
     providerName: provider.name,
+    aiEnabled: !!config.ai.enabled,
+    aiMode: aiProvider.hasModel() ? `llm:${config.ai.provider}/${config.ai.model}` : (config.ai.enabled ? 'heuristic' : 'disabled'),
   };
 }

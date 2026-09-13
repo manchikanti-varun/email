@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "benchmark": "node server/benchmark.js"
+    "benchmark": "node server/benchmark.js",
+    "test": "node --test"
   },
   "keywords": [
     "email",

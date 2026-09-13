@@ -80,6 +80,15 @@ export class ScheduleRepository {
   delete(_listId) { notImplemented('ScheduleRepository.delete'); }
 }
 
+export class AgentAuditRepository {
+  // Persist a single tool-invocation audit entry (secrets already redacted).
+  record(_entry) { notImplemented('AgentAuditRepository.record'); }
+  // Recent entries for a user, newest first.
+  findByUser(_userId, _limit) { notImplemented('AgentAuditRepository.findByUser'); }
+  // Recent entries within a single conversation/task.
+  findByConversation(_userId, _conversationId, _limit) { notImplemented('AgentAuditRepository.findByConversation'); }
+}
+
 // ---- Gateways / services --------------------------------------------------
 
 export class DnsResolver {

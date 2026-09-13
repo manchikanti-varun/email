@@ -11,6 +11,7 @@ should be removed or reviewed, and **exactly why**.
 - [Full documentation](docs/DOCUMENTATION.md) — complete reference (features, API, config, usage).
 - [Architecture](docs/ARCHITECTURE.md) — the clean-architecture layout of the server.
 - [Deployment](docs/DEPLOY.md) — deploying to Railway, Vercel, or a VPS.
+- [MailHealth AI Agent](docs/AGENT.md) — the optional AI operator that investigates list health and performs approved actions on top of the deterministic engine.
 
 ## Features (MVP scope)
 

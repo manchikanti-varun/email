@@ -74,6 +74,35 @@ export const config = {
   uploadLimitMb: parseInt(process.env.UPLOAD_LIMIT_MB || '25', 10),
   // Starting credits for a newly-registered account.
   signupCredits: parseInt(process.env.SIGNUP_CREDITS || '1000', 10),
+
+  // ---- AI Agent (optional intelligence/orchestration layer) --------------
+  // The whole agent is OFF by default. When disabled the app behaves exactly
+  // as before — the /api/agent endpoint returns a graceful "unavailable"
+  // message and no external calls are ever made. The deterministic
+  // verification engine remains the sole source of truth regardless.
+  ai: {
+    enabled: bool(process.env.AI_ENABLED, false),
+    // Provider adapter: 'openai' | 'anthropic' | 'openai-compatible'. Empty ->
+    // the agent runs in heuristic (no-LLM) planning mode when AI_ENABLED=true.
+    provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),
+    apiKey: process.env.AI_API_KEY || '',
+    model: process.env.AI_MODEL || '',
+    // Custom base URL for self-hosted / OpenAI-compatible gateways.
+    baseUrl: (process.env.AI_BASE_URL || '').replace(/\/$/, ''),
+    // Runtime safety limits.
+    timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || '20000', 10),
+    maxRetries: parseInt(process.env.AI_MAX_RETRIES || '2', 10),
+    maxIterations: parseInt(process.env.AI_MAX_ITERATIONS || '10', 10),
+    // Per-user requests allowed inside the agent rate window (per minute).
+    rateLimitPerMin: parseInt(process.env.AI_RATE_LIMIT_PER_MIN || '20', 10),
+    // Cost estimate ($ per 1K input / output tokens). Used for cost tracking
+    // only — never for billing. Defaults approximate gpt-4o-mini.
+    costPer1kInput: parseFloat(process.env.AI_COST_PER_1K_INPUT || '0.00015'),
+    costPer1kOutput: parseFloat(process.env.AI_COST_PER_1K_OUTPUT || '0.0006'),
+    // Show the user an estimated cost when a verification would spend at
+    // least this many credits without prior confirmation.
+    confirmSpendThreshold: parseInt(process.env.AI_CONFIRM_SPEND_THRESHOLD || '50', 10),
+  },
 };
 
 // Ensure data directory exists.

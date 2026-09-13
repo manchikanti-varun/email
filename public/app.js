@@ -113,6 +113,7 @@ function renderShell() {
   const nav = [
     ['dashboard', 'Dashboard'],
     ['lists', 'Lists'],
+    ['agent', 'MailHealth AI'],
     ['single', 'Single Check'],
     ['alerts', 'Alerts'],
     ['integrations', 'Integrations'],
@@ -147,6 +148,7 @@ function renderShell() {
   const views = {
     dashboard: viewDashboard,
     lists: () => (state.param ? viewListDetail(main, state.param) : viewLists(main)),
+    agent: (m) => viewAgent(m, state.param),
     single: viewSingle,
     alerts: viewAlerts,
     integrations: viewIntegrations,
@@ -592,6 +594,209 @@ async function viewAlerts(main) {
       </div>`).join('');
   }
   main.querySelector('#markRead').onclick = async () => { await api.markAlertsRead(); viewAlerts(main); updateAlertBell(); };
+}
+
+// ================= MAILHEALTH AI (agent) =================
+// A product-specific operator UI: quick actions, a conversation transcript with
+// live tool/action states, source attribution (verified vs AI), and an explicit
+// confirmation modal for destructive actions.
+const agentSession = { conversationId: null, listId: null, busy: false };
+
+const AGENT_QUICK_ACTIONS = [
+  'Analyze my latest list',
+  'Is my list ready to send?',
+  'Show risky contacts',
+  'Why did my health change?',
+  'Find contacts that need re-verification',
+  'Clean this list',
+];
+
+function viewAgent(main, paramListId) {
+  if (paramListId) agentSession.listId = paramListId;
+  main.innerHTML = `
+    <div class="agent-wrap">
+      <div class="agent-head">
+        <div class="agent-title"><span class="agent-glyph">🧠</span> MailHealth AI</div>
+        <p class="agent-sub">Ask me about your email lists. I investigate your list health and can perform approved actions — I never guess verification results.</p>
+      </div>
+      <div class="agent-quick" id="agentQuick">
+        ${AGENT_QUICK_ACTIONS.map((q) => `<button class="agent-chip" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
+      </div>
+      <div class="agent-thread" id="agentThread">
+        <div class="agent-empty">
+          <p><b>Try:</b> "Is my customer list ready to send?" · "Why did my health drop?" · "Find risky contacts" · "Clean my list"</p>
+        </div>
+      </div>
+      <div class="agent-composer">
+        <input id="agentInput" placeholder="Ask about your lists…" autocomplete="off"/>
+        <button class="btn" id="agentSend">Send</button>
+      </div>
+    </div>`;
+
+  const input = main.querySelector('#agentInput');
+  const send = main.querySelector('#agentSend');
+  const thread = main.querySelector('#agentThread');
+
+  function submit(text) {
+    const msg = (text ?? input.value).trim();
+    if (!msg || agentSession.busy) return;
+    input.value = '';
+    sendAgentMessage(msg, thread);
+  }
+
+  send.onclick = () => submit();
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  main.querySelectorAll('#agentQuick .agent-chip').forEach((b) => {
+    b.onclick = () => submit(b.dataset.q);
+  });
+}
+
+async function sendAgentMessage(message, thread, confirm) {
+  const empty = thread.querySelector('.agent-empty');
+  if (empty) empty.remove();
+
+  if (message) appendAgentBubble(thread, 'user', esc(message));
+
+  // Live "thinking" bubble with a tool-state line we update as actions arrive.
+  const thinking = h(`
+    <div class="agent-msg ai">
+      <div class="agent-avatar">AI</div>
+      <div class="agent-body">
+        <div class="agent-steps" id="agentSteps"><span class="agent-step">Thinking…</span></div>
+      </div>
+    </div>`);
+  thread.appendChild(thinking);
+  thread.scrollTop = thread.scrollHeight;
+
+  agentSession.busy = true;
+  try {
+    const res = await api.agentChat({
+      message,
+      listId: agentSession.listId || undefined,
+      conversationId: agentSession.conversationId || undefined,
+      confirm,
+    });
+    agentSession.conversationId = res.conversationId || agentSession.conversationId;
+
+    // Replace the thinking bubble with the real answer.
+    thinking.remove();
+    renderAgentResponse(thread, res);
+  } catch (e) {
+    thinking.remove();
+    appendAgentBubble(thread, 'ai', `<span class="error">${esc(e.message)}</span>`);
+  } finally {
+    agentSession.busy = false;
+    thread.scrollTop = thread.scrollHeight;
+  }
+}
+
+function renderAgentResponse(thread, res) {
+  const stepLabels = {
+    get_lists: 'Finding lists…',
+    get_list: 'Loading list…',
+    get_list_health: 'Checking health…',
+    analyze_list: 'Analyzing list…',
+    get_health_history: 'Checking health history…',
+    get_contacts: 'Inspecting contacts…',
+    get_risky_contacts: 'Inspecting risky contacts…',
+    get_unknown_contacts: 'Inspecting unknown contacts…',
+    get_remove_contacts: 'Inspecting remove contacts…',
+    get_cleaning_plan: 'Building cleaning plan…',
+    run_campaign_preflight: 'Running preflight…',
+    get_reverify_cost: 'Estimating credit cost…',
+    get_account_credits: 'Checking credits…',
+    start_verification: 'Starting verification…',
+    start_reverification: 'Starting re-verification…',
+    delete_contacts: 'Removing contacts…',
+    delete_list: 'Deleting list…',
+    export_list: 'Preparing export…',
+  };
+
+  const steps = (res.actions || []).map((a) => {
+    const label = stepLabels[a.tool] || a.tool;
+    const cls = a.status === 'ok' ? 'done' : (a.status === 'awaiting_confirmation' ? 'wait' : (a.status && a.status.startsWith('error') ? 'fail' : 'done'));
+    return `<span class="agent-step ${cls}">${esc(label)}</span>`;
+  }).join('');
+
+  const sources = (res.sources || []).length
+    ? `<div class="agent-sources">${res.sources.map((s) => `<span class="agent-source" title="${esc(s.label)}">✓ ${esc(s.label)}</span>`).join('')}</div>`
+    : '';
+
+  const bubble = h(`
+    <div class="agent-msg ai">
+      <div class="agent-avatar">AI</div>
+      <div class="agent-body">
+        ${steps ? `<div class="agent-steps">${steps}</div>` : ''}
+        <div class="agent-text">${formatAgentText(res.message)}</div>
+        ${sources}
+        <div class="agent-actions" id="agentActions"></div>
+        <div class="agent-meta">${esc(res.model || '')}${res.latency ? ' · ' + res.latency + 'ms' : ''}${res.estimatedCost ? ' · ~$' + res.estimatedCost.toFixed(4) : ''}</div>
+      </div>
+    </div>`);
+  thread.appendChild(bubble);
+
+  const actionsEl = bubble.querySelector('#agentActions');
+
+  // Contextual action buttons.
+  if (agentSession.listId || (res.pendingConfirmation && res.pendingConfirmation.args?.listId)) {
+    const lid = agentSession.listId || res.pendingConfirmation.args.listId;
+    const view = h(`<button class="btn ghost sm">View contacts</button>`);
+    view.onclick = () => { location.hash = '#/lists/' + lid; };
+    actionsEl.appendChild(view);
+  }
+
+  // Pending confirmation -> show the explicit destructive/spending modal.
+  if (res.pendingConfirmation) {
+    const confirmBtn = h(`<button class="btn sm">${res.pendingConfirmation.permission === 'destructive' ? 'Review & confirm' : 'Confirm'}</button>`);
+    confirmBtn.onclick = () => showAgentConfirm(res.pendingConfirmation, thread);
+    actionsEl.appendChild(confirmBtn);
+  }
+
+  thread.scrollTop = thread.scrollHeight;
+}
+
+// Turn plain text with our "Verified facts:" / "Recommendation:" markers into
+// lightly structured HTML.
+function formatAgentText(text) {
+  const safe = esc(text || '');
+  return safe
+    .replace(/^Verified facts:/gim, '<b class="agent-verified">Verified facts:</b>')
+    .replace(/^Recommendation:/gim, '<b class="agent-reco">Recommendation:</b>')
+    .replace(/\n/g, '<br>');
+}
+
+function showAgentConfirm(pending, thread) {
+  const destructive = pending.permission === 'destructive';
+  const modal = h(`
+    <div class="modal-backdrop">
+      <div class="modal-card agent-confirm ${destructive ? 'danger' : ''}" style="max-width:440px">
+        <div class="agent-confirm-head">${destructive ? '⚠ Confirmation required' : '● Confirmation required'}</div>
+        <p class="agent-confirm-body">${esc(pending.summary)}?</p>
+        ${destructive ? `<p class="agent-confirm-warn">This action cannot be undone.</p>` : ''}
+        <div class="toolbar" style="justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="btn ghost" id="agentCancel">Cancel</button>
+          <button class="btn ${destructive ? 'danger' : ''}" id="agentConfirm">${destructive ? 'Confirm removal' : 'Confirm'}</button>
+        </div>
+      </div>
+    </div>`);
+  document.body.appendChild(modal);
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  modal.querySelector('#agentCancel').onclick = () => modal.remove();
+  modal.querySelector('#agentConfirm').onclick = () => {
+    modal.remove();
+    sendAgentMessage('', thread, { tool: pending.tool, args: pending.args, token: pending.token });
+    refreshCredits();
+  };
+}
+
+function appendAgentBubble(thread, who, html) {
+  const bubble = h(`
+    <div class="agent-msg ${who}">
+      ${who === 'ai' ? '<div class="agent-avatar">AI</div>' : ''}
+      <div class="agent-body"><div class="agent-text">${html}</div></div>
+    </div>`);
+  thread.appendChild(bubble);
+  thread.scrollTop = thread.scrollHeight;
 }
 
 // ================= INTEGRATIONS =================

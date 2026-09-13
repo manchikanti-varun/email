@@ -103,6 +103,26 @@ CREATE TABLE IF NOT EXISTS schedules (
   next_run      TEXT NOT NULL,
   enabled       INTEGER NOT NULL DEFAULT 1
 );
+
+-- AI Agent audit log. One row per tool invocation the agent performs. Stores
+-- WHO, WHAT and the OUTCOME for accountability. Never stores secrets
+-- (passwords, API keys, tokens) — arguments are redacted before persistence.
+CREATE TABLE IF NOT EXISTS agent_audit_logs (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL,
+  user_request    TEXT,
+  tool_name       TEXT NOT NULL,
+  tool_args       TEXT,
+  permission      TEXT NOT NULL DEFAULT 'read',
+  status          TEXT NOT NULL DEFAULT 'ok',
+  confirmed       INTEGER NOT NULL DEFAULT 0,
+  duration_ms     INTEGER NOT NULL DEFAULT 0,
+  error           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_agent_audit_user ON agent_audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_agent_audit_conv ON agent_audit_logs(conversation_id);
 `);
 
 // ---- Lightweight column migrations for existing DBs -----------------------

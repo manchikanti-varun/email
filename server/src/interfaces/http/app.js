@@ -17,6 +17,7 @@ import { makeVerifyRouter } from './routes/verify-routes.js';
 import { makeListRouter } from './routes/list-routes.js';
 import { makeCampaignRouter } from './routes/campaign-routes.js';
 import { makeIntegrationRouter } from './routes/integration-routes.js';
+import { makeAgentRouter } from './routes/agent-routes.js';
 
 export function buildApp(container) {
   const { config, db, verifyCapability, useCases, authRequired, cookies } = container;
@@ -90,6 +91,7 @@ export function buildApp(container) {
   app.use('/api/lists', makeListRouter({ ...useCases, authRequired, uploadLimitMb: config.uploadLimitMb }));
   app.use('/api/campaigns', makeCampaignRouter({ ...useCases, authRequired }));
   app.use('/api/integrations', makeIntegrationRouter({ ...useCases, authRequired }));
+  app.use('/api/agent', makeAgentRouter({ ...useCases, authRequired }));
 
   // ---- Static frontend ----
   app.use(express.static(publicDir, {
