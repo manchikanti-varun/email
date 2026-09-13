@@ -1,5 +1,5 @@
-# Pin the Node version for Railway/Nixpacks. Node 20 has prebuilt binaries for
-# better-sqlite3, so no source compilation (and no Python/gcc) is needed.
-# python3 + gcc are included anyway as a safety net for any native rebuild.
+# Pin the Node version for Railway/Nixpacks. Node 24 has prebuilt binaries for
+# better-sqlite3 (v13+, N-API), so no source compilation (and no Python/gcc) is
+# needed. python3 + gcc are included anyway as a safety net for any native rebuild.
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x", "python3", "gcc", "gnumake"]
+nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
