@@ -1,0 +1,104 @@
+import express from 'express';
+import multer from 'multer';
+import xlsx from 'xlsx';
+import { asyncHandler } from '../middleware.js';
+
+export function makeListRouter({
+  uploadList, startListVerification, getListProgress, getLists, getListDetail,
+  getCleaningPlan, getExportData, bulkDeleteByClassification, scheduleReverification,
+  deleteList, authRequired, uploadLimitMb,
+}) {
+  const router = express.Router();
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: uploadLimitMb * 1024 * 1024, files: 1 },
+  });
+
+  // Upload: parse, dedupe, create list (does not verify yet).
+  router.post('/upload', authRequired, upload.single('file'), asyncHandler((req, res) => {
+    const result = uploadList.execute(req.user.id, req.file?.buffer, req.file?.originalname);
+    res.json(result);
+  }));
+
+  // Trigger verification of a list.
+  router.post('/:id/verify', authRequired, asyncHandler((req, res) => {
+    const reverify = req.query.reverify === 'true';
+    res.json(startListVerification.execute(req.user.id, req.params.id, reverify));
+  }));
+
+  // Progress polling.
+  router.get('/:id/progress', authRequired, asyncHandler((req, res) => {
+    res.json(getListProgress.execute(req.user.id, req.params.id));
+  }));
+
+  // Schedule re-verification.
+  router.post('/:id/schedule', authRequired, asyncHandler((req, res) => {
+    res.json(scheduleReverification.execute(
+      req.user.id, req.params.id, req.body?.intervalDays, req.body?.enabled));
+  }));
+
+  // List index.
+  router.get('/', authRequired, asyncHandler((req, res) => {
+    res.json(getLists.execute(req.user.id));
+  }));
+
+  // List detail.
+  router.get('/:id', authRequired, asyncHandler((req, res) => {
+    res.json(getListDetail.execute(req.user.id, req.params.id));
+  }));
+
+  // Automated cleaning plan.
+  router.get('/:id/clean', authRequired, asyncHandler((req, res) => {
+    res.json(getCleaningPlan.execute(req.user.id, req.params.id));
+  }));
+
+  // Export (CSV or XLSX). Formatting is an HTTP concern and lives here.
+  router.get('/:id/export', authRequired, asyncHandler((req, res) => {
+    const filter = (req.query.filter || 'all').toString();
+    const format = (req.query.format || 'csv').toString();
+    const { list, contacts } = getExportData.execute(req.user.id, req.params.id, filter);
+    const safeName = (list.name || 'list').replace(/[^a-z0-9._-]/gi, '_');
+
+    if (format === 'xlsx') {
+      const rows = contacts.map((c) => ({
+        email: c.email,
+        score: c.score ?? '',
+        classification: c.classification ?? '',
+        status: c.status ?? '',
+        recommendation: c.recommendation ?? '',
+        reasons: (c.reasons || []).join(' | '),
+      }));
+      const ws = xlsx.utils.json_to_sheet(rows);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, 'Contacts');
+      const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${filter}.xlsx"`);
+      return res.send(buf);
+    }
+
+    const header = 'email,score,classification,status,recommendation,reasons\n';
+    const rows = contacts.map((c) => {
+      const reasons = (c.reasons || []).join(' | ').replace(/"/g, '""');
+      const rec = (c.recommendation || '').replace(/"/g, '""');
+      return `${c.email},${c.score ?? ''},${c.classification ?? ''},${c.status ?? ''},"${rec}","${reasons}"`;
+    });
+    const csv = header + rows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${filter}.csv"`);
+    res.send(csv);
+  }));
+
+  // Bulk contact actions.
+  router.post('/:id/contacts/bulk', authRequired, asyncHandler((req, res) => {
+    const { action, classification } = req.body || {};
+    res.json(bulkDeleteByClassification.execute(req.user.id, req.params.id, action, classification));
+  }));
+
+  // Delete list.
+  router.delete('/:id', authRequired, asyncHandler((req, res) => {
+    res.json(deleteList.execute(req.user.id, req.params.id));
+  }));
+
+  return router;
+}

@@ -1,0 +1,153 @@
+// SmtpProbe adapter using a raw TCP socket. Performs an SMTP conversation up
+// to (but never completing) RCPT TO, so no mail is sent. Also probes a random
+// address to detect catch-all domains.
+import net from 'node:net';
+import { SmtpProbe } from '../../domain/ports/index.js';
+
+function randomLocalPart() {
+  return 'no-such-user-' + Math.random().toString(36).slice(2, 12);
+}
+
+// Runs one SMTP conversation against `host` and returns the RCPT result codes.
+function probe(host, from, recipients, timeoutMs) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port: 25 });
+    socket.setEncoding('utf8');
+    socket.setTimeout(timeoutMs);
+
+    const out = { connected: false, greeting: null, rcpt: {}, error: null };
+    let step = 0;
+    let rcptIndex = 0;
+    let buffer = '';
+    let settled = false;
+
+    const domain = (from.split('@')[1] || 'localhost');
+
+    const hardTimer = setTimeout(() => {
+      if (!out.error) out.error = 'timeout';
+      finish();
+    }, timeoutMs + 500);
+
+    function send(line) { socket.write(line + '\r\n'); }
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      try { socket.destroy(); } catch { /* ignore */ }
+      resolve(out);
+    }
+
+    function handleResponse(codeLine) {
+      const code = parseInt(codeLine.slice(0, 3), 10);
+      switch (step) {
+        case 0:
+          out.connected = true;
+          out.greeting = code;
+          step = 1;
+          send('EHLO ' + domain);
+          break;
+        case 1:
+          step = 2;
+          send('MAIL FROM:<' + from + '>');
+          break;
+        case 2:
+          if (recipients.length === 0) {
+            step = 4;
+            send('QUIT');
+            finish();
+            break;
+          }
+          step = 3;
+          send('RCPT TO:<' + recipients[rcptIndex] + '>');
+          break;
+        case 3:
+          out.rcpt[recipients[rcptIndex]] = code;
+          rcptIndex += 1;
+          if (rcptIndex < recipients.length) {
+            send('RCPT TO:<' + recipients[rcptIndex] + '>');
+          } else {
+            step = 4;
+            send('QUIT');
+            finish();
+          }
+          break;
+        default:
+          break;
+      }
+    }
+
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (line.length >= 4 && line[3] === '-') continue; // multiline continuation
+        if (line.length >= 3) handleResponse(line);
+      }
+    });
+
+    socket.on('timeout', () => { out.error = 'timeout'; finish(); });
+    socket.on('error', (err) => { out.error = err.code || err.message; finish(); });
+    socket.on('close', () => finish());
+  });
+}
+
+export class SocketSmtpProbe extends SmtpProbe {
+  /** @param {{enabled:boolean, from:string, timeoutMs:number}} smtpConfig */
+  constructor(smtpConfig) {
+    super();
+    this.cfg = smtpConfig;
+  }
+
+  async check(email, mxHosts) {
+    if (!this.cfg.enabled) return { skipped: true, reachable: null };
+    if (!mxHosts || mxHosts.length === 0) return { reachable: false, error: 'no-mx' };
+
+    const host = mxHosts[0];
+    const from = this.cfg.from;
+    const catchAllProbe = randomLocalPart() + '@' + email.split('@')[1];
+
+    const res = await probe(host, from, [email, catchAllProbe], this.cfg.timeoutMs);
+
+    if (!res.connected) {
+      // Never strong enough evidence to mark undeliverable — usually our own
+      // network (outbound port 25 blocked). Treat as inconclusive.
+      return { reachable: false, error: res.error || 'connection-failed', inconclusive: true };
+    }
+
+    const mailboxCode = res.rcpt[email];
+    const probeCode = res.rcpt[catchAllProbe];
+    const accepts = (c) => typeof c === 'number' && c >= 200 && c < 300;
+    const rejects = (c) => typeof c === 'number' && c >= 500 && c < 600;
+    const temp = (c) => typeof c === 'number' && c >= 400 && c < 500;
+
+    return {
+      reachable: true,
+      mailboxExists: accepts(mailboxCode),
+      mailboxRejected: rejects(mailboxCode),
+      temporaryFailure: temp(mailboxCode) || temp(probeCode),
+      catchAll: accepts(probeCode),
+      code: mailboxCode,
+      probeCode,
+      greylisted: temp(mailboxCode),
+    };
+  }
+
+  async selfTest() {
+    if (!this.cfg.enabled) {
+      return { available: false, reason: 'disabled', detail: 'SMTP_ENABLED is false' };
+    }
+    const host = 'gmail-smtp-in.l.google.com';
+    const res = await probe(host, this.cfg.from, [], Math.min(this.cfg.timeoutMs, 6000));
+    if (res.connected) {
+      return { available: true, reason: 'ok', detail: `connected to ${host}:25` };
+    }
+    return {
+      available: false,
+      reason: res.error === 'timeout' ? 'port25_blocked' : (res.error || 'unreachable'),
+      detail: `could not reach ${host}:25 (${res.error || 'no connection'}); outbound port 25 is likely blocked`,
+    };
+  }
+}

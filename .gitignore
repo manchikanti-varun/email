@@ -10,3 +10,5 @@ uploads/
 _*.txt
 _*.csv
 .DS_Store
+*.md
+!README.md

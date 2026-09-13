@@ -6,6 +6,12 @@ should be removed or reviewed, and **exactly why**.
 
 > Upload → Analyze → Verify → Score → Explain → Clean → Monitor
 
+## Documentation
+
+- [Full documentation](docs/DOCUMENTATION.md) — complete reference (features, API, config, usage).
+- [Architecture](docs/ARCHITECTURE.md) — the clean-architecture layout of the server.
+- [Deployment](docs/DEPLOY.md) — deploying to Railway, Vercel, or a VPS.
+
 ## Features (MVP scope)
 
 - **User authentication** — register / login with JWT + secure cookie.

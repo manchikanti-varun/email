@@ -9,11 +9,26 @@
 //
 // Dataset format: [{ "email": "...", "expected": "safe|review|remove|unknown" }, ...]
 import fs from 'node:fs';
-import { verifyEmail } from './verify/engine.js';
-import { getProvider, providerName, hasRealProvider } from './verify/providers.js';
-import { loadFeeds } from './verify/data.js';
+import { ROOT } from './config.js';
+import { VerificationEngine } from './src/domain/verification/engine.js';
+import { ReferenceData } from './src/domain/verification/reference-data.js';
+import { NodeDnsResolver } from './src/infrastructure/verification/node-dns-resolver.js';
+import { SocketSmtpProbe } from './src/infrastructure/verification/socket-smtp-probe.js';
+import { selectProvider } from './src/infrastructure/verification/providers.js';
+import { loadFeeds } from './src/infrastructure/verification/feed-loader.js';
+import { config } from './config.js';
 
-loadFeeds();
+const referenceData = new ReferenceData();
+loadFeeds(referenceData, ROOT);
+
+const provider = selectProvider(process.env);
+const hasRealProvider = provider.name !== 'none';
+const engine = new VerificationEngine({
+  dnsResolver: new NodeDnsResolver(),
+  smtpProbe: new SocketSmtpProbe(config.smtp),
+  getProvider: () => provider,
+  referenceData,
+});
 
 const PROVIDER_COST_USD = parseFloat(process.env.PROVIDER_COST_PER_VERIFY || '0.004');
 
@@ -32,21 +47,19 @@ async function main() {
   }
   const dataset = JSON.parse(fs.readFileSync(arg, 'utf8'));
 
-  const useProvider = hasRealProvider();
   console.log(`\nBenchmark — ${dataset.length} labelled addresses`);
-  console.log(useProvider
-    ? `External provider: ${providerName()} | assumed cost/verify: $${PROVIDER_COST_USD}\n`
+  console.log(hasRealProvider
+    ? `External provider: ${provider.name} | assumed cost/verify: $${PROVIDER_COST_USD}\n`
     : 'External provider: none (local + live-SMTP engine only)\n');
 
-  const provider = useProvider ? getProvider() : null;
   const results = [];
   const t0 = Date.now();
 
   for (const item of dataset) {
-    const local = await verifyEmail(item.email, { useProvider: false });
+    const local = await engine.verify(item.email, { useProvider: false });
     const row = { email: item.email, expected: item.expected, result: local.classification };
 
-    if (provider) {
+    if (hasRealProvider) {
       let providerClass = 'unknown';
       try {
         const p = await provider.verify(item.email, {
@@ -67,7 +80,7 @@ async function main() {
 
   console.log('\n── Summary ─────────────────────────────');
   console.log(`Engine accuracy vs labels: ${accuracyFor(results, 'result')}%`);
-  if (provider) {
+  if (hasRealProvider) {
     let agree = 0;
     for (const r of results) if (r.result === r.provider) agree++;
     console.log(`Provider accuracy vs labels: ${accuracyFor(results, 'provider')}%`);
