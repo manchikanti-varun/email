@@ -171,7 +171,7 @@ function ContactModal({ contact, listId, onClose }: { contact: Contact; listId: 
         <RiskChips riskSignals={contact.riskSignals} />
       </div>
 
-      <CalibratedConfidencePanel cal={cal} />
+      <CalibratedConfidencePanel cal={cal} verdict={contact.deliverability || contact.status} />
 
       <h3 style={{ margin: '14px 0 6px', fontSize: 13 }}>Technical evidence</h3>
       {(contact.signals || []).map((s, i) => (

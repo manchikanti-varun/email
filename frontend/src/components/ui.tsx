@@ -8,7 +8,7 @@ import type {
   StatementKind,
   StatementConfidence,
 } from '../types';
-import { scoreColor, ACTION_STYLE, DELIV_STYLE, CONF_COLOR, CAL_LEVEL_COLOR } from '../lib/format';
+import { scoreColor, ACTION_STYLE, DELIV_STYLE, CONF_COLOR } from '../lib/format';
 
 // ---- Nav icons ----
 const NAV_ICONS: Record<string, ReactNode> = {
@@ -156,15 +156,19 @@ export function SignalRow({ signal }: { signal: Signal }) {
 }
 
 // ---- Calibration ----
-export function CalibratedConfidencePanel({ cal }: { cal?: CalibratedConfidence | null }) {
+export function CalibratedConfidencePanel({ cal, verdict }: { cal?: CalibratedConfidence | null; verdict?: string }) {
   if (!cal || typeof cal !== 'object') return null;
   const pct = Number.isFinite(cal.score) ? Math.round((cal.score as number) * 100) : null;
-  const color = CAL_LEVEL_COLOR[cal.level || ''] || 'var(--muted)';
+  // Color by the VERDICT, not by the confidence magnitude — a high confidence
+  // in an "undeliverable" verdict must not look green/positive. The % measures
+  // how sure we are of the verdict, whatever that verdict is.
+  const verdictColor = verdict ? DELIV_STYLE[verdict]?.color || 'var(--muted)' : 'var(--text)';
+  const verdictLabel = verdict ? DELIV_STYLE[verdict]?.label || verdict : null;
 
   return (
     <div className="card" style={{ marginTop: 14, background: 'var(--panel-2, transparent)' }}>
       <div className="stat-label">
-        MailHealth confidence in this result{' '}
+        How sure we are of the verdict{' '}
         {cal.available ? (
           <span className="pill" style={{ marginLeft: 6 }} title="Calibration model version">
             {cal.model || 'ml'}
@@ -175,9 +179,15 @@ export function CalibratedConfidencePanel({ cal }: { cal?: CalibratedConfidence 
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '4px 0' }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color }}>{pct == null ? '—' : pct + '%'}</span>
-        <span style={{ color, fontWeight: 600 }}>{cal.level || '—'}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '4px 0', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{pct == null ? '—' : pct + '%'}</span>
+        <span style={{ color: 'var(--muted)', fontWeight: 600 }}>{cal.level || '—'}</span>
+        {verdictLabel && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            sure this is{' '}
+            <span style={{ color: verdictColor, fontWeight: 600 }}>{verdictLabel}</span>
+          </span>
+        )}
       </div>
       <div className="muted" style={{ fontSize: 12 }}>{cal.interpretation || ''}</div>
       {cal.evidence && cal.evidence.length > 0 && (
@@ -205,10 +215,13 @@ export function CalibratedConfidencePanel({ cal }: { cal?: CalibratedConfidence 
 export function CalibratedBadge({ cal }: { cal?: CalibratedConfidence | null }) {
   if (!cal || typeof cal !== 'object' || cal.level == null) return null;
   const pct = Number.isFinite(cal.score) ? Math.round((cal.score as number) * 100) : null;
-  const color = CAL_LEVEL_COLOR[cal.level] || 'var(--muted)';
-  const title = cal.available ? `Calibrated (${cal.model || 'ml'})` : 'Deterministic fallback';
+  // Neutral color: this is confidence IN the verdict, not a good/bad score, so
+  // it must not imply positivity (green) on its own.
+  const title = cal.available
+    ? `Calibrated confidence in the verdict (${cal.model || 'ml'})`
+    : 'Deterministic confidence in the verdict';
   return (
-    <span className="pill" title={title} style={{ color }}>
+    <span className="pill" title={title} style={{ color: 'var(--text-2)' }}>
       {cal.level}
       {pct == null ? '' : ' ' + pct + '%'}
     </span>

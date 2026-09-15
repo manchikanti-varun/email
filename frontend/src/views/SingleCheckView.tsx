@@ -68,7 +68,7 @@ function SingleResult({ r }: { r: VerifyResult }) {
         <RiskChips riskSignals={r.riskSignals} />
       </div>
 
-      <CalibratedConfidencePanel cal={r.confidenceCalibration} />
+      <CalibratedConfidencePanel cal={r.confidenceCalibration} verdict={r.deliverability || r.status} />
 
       <h3 style={{ fontSize: 13, margin: '14px 0 6px' }}>Technical evidence</h3>
       {(r.signals || []).map((s, i) => (
