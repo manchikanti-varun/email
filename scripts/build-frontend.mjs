@@ -16,8 +16,11 @@ const contents =
   `window.__API_BASE__ = ${JSON.stringify(backendUrl)};\n`;
 
 // Written into the Vite source public dir so the build copies it through to
-// the final public/ output. (Vite empties public/ on build.)
-const outPath = path.join(root, 'frontend', 'public', 'config.js');
+// the final public/ output. (Vite empties public/ on build.) The directory may
+// not exist on a fresh checkout (config.js is gitignored), so ensure it.
+const outDir = path.join(root, 'frontend', 'public');
+fs.mkdirSync(outDir, { recursive: true });
+const outPath = path.join(outDir, 'config.js');
 fs.writeFileSync(outPath, contents);
 
 console.log(`[build-frontend] wrote public/config.js with API base: ${backendUrl || '(empty — same-origin)'}`);
