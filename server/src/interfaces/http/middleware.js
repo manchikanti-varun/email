@@ -8,6 +8,12 @@ export const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---- Request logging -------------------------------------------------------
+// Sanitize strings before inserting into log lines to prevent log forging/injection.
+// Control chars (newlines, tabs) can forge log entries or inject ANSI escape codes.
+function sanitizeLogStr(s) {
+  return String(s || '').replace(/[\r\n\x00-\x1f\x7f]/g, '_').slice(0, 500);
+}
+
 export function makeRequestLogger(config) {
   return function requestLogger(req, res, next) {
     const start = Date.now();
@@ -16,7 +22,9 @@ export function makeRequestLogger(config) {
       if (config.isProd && !req.path.startsWith('/api/')) return;
       const line = JSON.stringify({
         t: new Date().toISOString(), m: req.method,
-        p: req.originalUrl.split('?')[0], s: res.statusCode, ms, ip: req.ip,
+        p: sanitizeLogStr(req.originalUrl.split('?')[0]),
+        s: res.statusCode, ms,
+        ip: sanitizeLogStr(req.ip),
       });
       if (res.statusCode >= 500) console.error(line);
       else console.log(line);

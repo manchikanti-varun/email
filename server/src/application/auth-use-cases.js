@@ -5,8 +5,17 @@ import { nanoid } from 'nanoid';
 import { AppError } from './errors.js';
 import { toPublicUser } from '../domain/entities/user.js';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function isEmail(v) { return typeof v === 'string' && v.length <= 254 && EMAIL_RE.test(v); }
+// Stricter than RFC 5322 but rejects common invalid patterns: consecutive dots,
+// leading/trailing dots in local part, missing TLD, etc.
+const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+function isEmail(v) {
+  if (typeof v !== 'string' || v.length > 254 || v.length < 3) return false;
+  if (!EMAIL_RE.test(v)) return false;
+  // Additional: reject consecutive dots in local part (a..b@c.com)
+  const local = v.split('@')[0];
+  if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return false;
+  return true;
+}
 
 // Password policy: at least 8 chars, with a letter and a number.
 function passwordProblem(pw) {

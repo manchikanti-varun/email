@@ -5,10 +5,24 @@ import https from 'node:https';
 import crypto from 'node:crypto';
 import { WebhookSender } from '../../domain/ports/index.js';
 
+// SSRF guard: refuse to deliver webhooks to private/internal destinations.
+function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  // IPv4 private ranges
+  if (/^(127|10|172\.(1[6-9]|2\d|3[01])|192\.168)\./.test(h)) return true;
+  // 169.254.x.x (link-local / cloud metadata)
+  if (/^169\.254\./.test(h)) return true;
+  // IPv6 loopback / ULA
+  if (/^(\[::1\]|\[::ffff:127|\[0:0:0:0|\[fd|\[fe80)/i.test(h)) return true;
+  return false;
+}
+
 function post(url, payload, secret) {
   return new Promise((resolve) => {
     let u;
     try { u = new URL(url); } catch { return resolve(false); }
+    if (isPrivateHost(u.hostname)) { console.warn(`Webhook blocked (SSRF): ${url}`); return resolve(false); }
     const body = JSON.stringify(payload);
     const signature = secret
       ? crypto.createHmac('sha256', secret).update(body).digest('hex')

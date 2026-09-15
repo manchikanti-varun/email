@@ -142,7 +142,11 @@ function usage() {
   console.error(`
 Usage:
   node scripts/export-calibration-dataset.mjs --labels labels.json [--out dataset.json] [--list <listId>]
+  node scripts/export-calibration-dataset.mjs labels.json [out.json]
   node scripts/export-calibration-dataset.mjs --known-good good.txt --known-bad bad.txt [--out dataset.json]
+
+  # Prefer calling node directly (npm may swallow --labels / --out on some versions):
+  node scripts/export-calibration-dataset.mjs --labels scripts/labels.example.json --out calibration-dataset.json
 
 Labels must be INDEPENDENT of the engine verdict (seed mailboxes, bounce/ESP
 outcomes, manual review, provider REFERENCE). Never copy deliverability as GT.
@@ -152,10 +156,16 @@ Then:
 `);
 }
 
-const labelsPath = arg('--labels');
+// Positional fallback: <labels.json> [out.json]
+// npm on Windows often eats --labels/--out as its own config flags.
+const positionals = process.argv.slice(2).filter((a) => a && !a.startsWith('--'));
+
+const labelsPath = arg('--labels') || positionals[0] || null;
 const knownGoodPath = arg('--known-good');
 const knownBadPath = arg('--known-bad');
-const outPath = arg('--out') || path.join(__dirname, '..', 'calibration-dataset.json');
+const outPath = arg('--out')
+  || positionals[1]
+  || path.join(__dirname, '..', 'calibration-dataset.json');
 const listFilter = arg('--list');
 
 if (!labelsPath && !knownGoodPath && !knownBadPath) {

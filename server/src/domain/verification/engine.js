@@ -50,6 +50,25 @@ export class VerificationEngine {
     this.ref = referenceData;
   }
 
+  // Pre-resolve DNS for a batch of emails so individual verify() calls hit the
+  // in-process cache instead of re-resolving the same domains. For a bulk run
+  // with many addresses on the same domain this eliminates redundant DNS queries
+  // and avoids the thundering-herd problem where N concurrent workers all
+  // resolve the same MX before any result is cached.
+  async preResolveDomains(emails = []) {
+    const domains = new Set();
+    for (const raw of emails) {
+      const email = normalizeEmail(raw);
+      const { domain } = parseEmail(email);
+      if (domain) domains.add(domain);
+    }
+    // Resolve all unique domains in parallel. Errors are swallowed — individual
+    // verify() calls will handle missing DNS gracefully.
+    await Promise.allSettled(
+      [...domains].map((d) => this.dns.resolveDomain(d).catch(() => null)),
+    );
+  }
+
   async verify(rawEmail, options = {}) {
     const useProvider = options.useProvider !== false;
     const email = normalizeEmail(rawEmail);

@@ -57,7 +57,12 @@ export function makeListRouter({
     const filter = (req.query.filter || 'all').toString();
     const format = (req.query.format || 'csv').toString();
     const { list, contacts } = getExportData.execute(req.user.id, req.params.id, filter);
-    const safeName = (list.name || 'list').replace(/[^a-z0-9._-]/gi, '_');
+    // Sanitize filename: strip control chars and CRLF to prevent header injection,
+    // then replace non-safe chars with underscores.
+    const safeName = (list.name || 'list')
+      .replace(/[\r\n\x00-\x1f]/g, '')
+      .replace(/[^a-z0-9._-]/gi, '_')
+      .slice(0, 100);
 
     if (format === 'xlsx') {
       const rows = contacts.map((c) => ({

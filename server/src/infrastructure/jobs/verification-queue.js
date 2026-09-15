@@ -80,6 +80,13 @@ export class VerificationQueue {
 
     const pending = this.contacts.findPending(job.list_id, job.type);
     const emails = pending.map((c) => c.email);
+
+    // Pre-resolve DNS for all unique domains so concurrent workers hit the
+    // in-process cache instead of thundering-herd on the same MX records.
+    if (emails.length > 0) {
+      try { await this.engine.preResolveDomains(emails); } catch { /* best-effort */ }
+    }
+
     let done = job.done || 0;
     let index = 0;
 

@@ -41,7 +41,22 @@ export function validateVerifyBody(body) {
 
 export function makeRateLimiter({ perMin }) {
   const hits = new Map(); // ip -> [timestamps]
+  let lastSweep = Date.now();
+
+  // Periodic cleanup to prevent unbounded memory growth from abandoned IPs.
+  function sweep() {
+    const now = Date.now();
+    if (now - lastSweep < 120_000) return; // every 2 minutes
+    lastSweep = now;
+    for (const [ip, arr] of hits) {
+      const fresh = arr.filter((t) => now - t < 60_000);
+      if (fresh.length === 0) hits.delete(ip);
+      else hits.set(ip, fresh);
+    }
+  }
+
   return function rateLimit(req, res, next) {
+    sweep();
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const now = Date.now();
     const arr = (hits.get(ip) || []).filter((t) => now - t < 60_000);

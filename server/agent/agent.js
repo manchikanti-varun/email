@@ -20,8 +20,21 @@ import { agentLogger } from './logger.js';
 
 // Per-user sliding-window rate limiter (in-process).
 const rateWindow = new Map(); // userId -> [timestamps]
+let lastRateSweep = Date.now();
+
+function sweepRateWindow() {
+  const now = Date.now();
+  if (now - lastRateSweep < 120_000) return; // every 2 minutes
+  lastRateSweep = now;
+  for (const [uid, arr] of rateWindow) {
+    const fresh = arr.filter((t) => now - t < 60_000);
+    if (fresh.length === 0) rateWindow.delete(uid);
+    else rateWindow.set(uid, fresh);
+  }
+}
 
 function rateLimited(userId, perMin) {
+  sweepRateWindow();
   const now = Date.now();
   const arr = (rateWindow.get(userId) || []).filter((t) => now - t < 60_000);
   arr.push(now);

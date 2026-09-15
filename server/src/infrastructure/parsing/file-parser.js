@@ -57,9 +57,18 @@ function extractFromRows(rows) {
 }
 
 function parseCsv(text) {
+  const lines = text.split(/\r?\n/);
   const rows = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
     if (line.trim() === '') continue;
+    // Fast path: if the line has no quotes, a simple split is correct and
+    // avoids the O(n) character scan. Most CSV exports are unquoted.
+    if (!line.includes('"')) {
+      rows.push(line.split(','));
+      continue;
+    }
+    // Slow path: handle quoted fields (commas and escaped quotes inside).
     const cells = [];
     let cur = '';
     let inQuotes = false;
