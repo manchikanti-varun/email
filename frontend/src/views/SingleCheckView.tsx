@@ -43,17 +43,22 @@ function SingleResult({ r }: { r: VerifyResult }) {
         </div>
         <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
           <div className="stat-label">
-            AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+            AI confidence{' '}
+            <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>
+              {r.confidenceCalibration && r.confidenceCalibration.available ? 'ML' : 'N/A'}
+            </span>
           </div>
           <div style={{ margin: '6px 0 4px' }}>
-            {r.confidenceCalibration && r.confidenceCalibration.level ? (
+            {r.confidenceCalibration && r.confidenceCalibration.available && r.confidenceCalibration.level ? (
               <CalibratedBadge cal={r.confidenceCalibration} />
             ) : (
-              <span className="muted" style={{ fontSize: 12 }}>Not available</span>
+              <span className="muted" style={{ fontSize: 12 }}>No ML model deployed</span>
             )}
           </div>
           <div className="muted" style={{ fontSize: 11 }}>
-            How reliable the verdict is. This never overrides the deterministic result.
+            {r.confidenceCalibration && r.confidenceCalibration.available
+              ? 'ML estimate of how reliable the verdict is. Never overrides it.'
+              : 'No trained ML model yet, so there is no independent AI estimate — the deterministic verdict stands on its own.'}
           </div>
         </div>
       </div>

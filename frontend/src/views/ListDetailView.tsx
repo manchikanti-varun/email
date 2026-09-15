@@ -70,6 +70,27 @@ function RiskSummary({ riskSignals }: { riskSignals?: RiskSignal[] }) {
   );
 }
 
+// True when a trained ML model produced this contact's calibration (not the
+// deterministic fallback that just re-encodes the engine's own confidence).
+function hasRealMl(c: Contact): boolean {
+  return !!(c.calibrationLevel && c.calibrationModel && c.calibrationModel !== 'deterministic-fallback');
+}
+
+// AI-confidence table cell. Only shows a real ML badge when a trained model
+// exists; otherwise it's honest that the value is the deterministic engine's
+// own confidence, not an ML estimate.
+function AiConfidenceCell({ contact }: { contact: Contact }) {
+  if (hasRealMl(contact)) return <CalibratedBadge cal={calFromContact(contact)} />;
+  return (
+    <span
+      className="muted"
+      title="No trained ML model is deployed, so there is no independent AI estimate. The deterministic verdict and its confidence stand on their own."
+    >
+      —
+    </span>
+  );
+}
+
 // ---- Contact modal ----
 function calFromContact(c: Contact): CalibratedConfidence | undefined {
   if (!c.calibrationLevel) return undefined;
@@ -125,17 +146,22 @@ function ContactModal({ contact, listId, onClose }: { contact: Contact; listId: 
         </div>
         <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
           <div className="stat-label">
-            AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+            AI confidence{' '}
+            <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>
+              {cal && cal.available ? 'ML' : 'N/A'}
+            </span>
           </div>
           <div style={{ margin: '6px 0 4px' }}>
-            {cal && cal.level ? (
+            {cal && cal.available && cal.level ? (
               <CalibratedBadge cal={cal} />
             ) : (
-              <span className="muted" style={{ fontSize: 12 }}>Not available</span>
+              <span className="muted" style={{ fontSize: 12 }}>No ML model deployed</span>
             )}
           </div>
           <div className="muted" style={{ fontSize: 11 }}>
-            How reliable the verdict is. This never overrides the deterministic result.
+            {cal && cal.available
+              ? 'ML estimate of how reliable the verdict is. Never overrides it.'
+              : 'No trained ML model yet, so there is no independent AI estimate — the deterministic verdict stands on its own.'}
           </div>
         </div>
       </div>
@@ -226,11 +252,7 @@ function ContactsTable({ contacts, listId }: { contacts: Contact[]; listId: stri
                     <ConfidenceLabel value={c.confidence} />
                   </td>
                   <td>
-                    {c.calibrationLevel ? (
-                      <CalibratedBadge cal={calFromContact(c)} />
-                    ) : (
-                      <span className="muted" title="No ML calibration available for this contact — the deterministic verdict stands on its own.">—</span>
-                    )}
+                    <AiConfidenceCell contact={c} />
                   </td>
                   <td>
                     <RiskSummary riskSignals={c.riskSignals} />
