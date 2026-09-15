@@ -20,9 +20,9 @@ export function start() {
     console.log(`\n  Email List Health Platform (${config.env})`);
     console.log(`  → http://localhost:${config.port}`);
     scheduler.start();
-    queue.resume();
 
-    // Tell the operator, honestly, how accurate verification will be here.
+    // Learn local port-25 / worker capability BEFORE resuming jobs so auto-mode
+    // does not stampede N concurrent local timeouts on the first batch.
     smtpProbe.selfTest().then((r) => {
       verifyCapability.liveSmtp = r.available;
       verifyCapability.smtpDetail = r.detail;
@@ -45,6 +45,10 @@ export function start() {
         console.log('      port 25 open and set SMTP_WORKER_URL + SMTP_WORKER_SECRET here.');
       }
       console.log('');
+      queue.resume();
+    }).catch((err) => {
+      console.error('  SMTP self-test failed:', err?.message || err);
+      queue.resume();
     });
   });
 

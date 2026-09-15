@@ -94,11 +94,28 @@ function probe(host, from, recipients, timeoutMs) {
   });
 }
 
+// Catch-all is a DOMAIN property, so we memoize it per domain for a short
+// window. On a bulk run with many addresses on the same domain this avoids
+// re-sending the random-address (catch-all) RCPT on every single email — a
+// real throughput win — while keeping verdicts identical (the per-mailbox RCPT
+// still runs for every address).
+const CATCHALL_TTL_MS = 10 * 60 * 1000;
+
 export class SocketSmtpProbe extends SmtpProbe {
   /** @param {{enabled:boolean, from:string, timeoutMs:number}} smtpConfig */
   constructor(smtpConfig) {
     super();
     this.cfg = smtpConfig;
+    this._catchAll = new Map(); // domain -> { at, isCatchAll }
+  }
+
+  _catchAllCached(domain) {
+    const hit = this._catchAll.get(domain);
+    if (hit && Date.now() - hit.at < CATCHALL_TTL_MS) return hit.isCatchAll;
+    return null; // unknown
+  }
+  _setCatchAll(domain, isCatchAll) {
+    this._catchAll.set(domain, { at: Date.now(), isCatchAll });
   }
 
   async check(email, mxHosts) {
@@ -107,9 +124,19 @@ export class SocketSmtpProbe extends SmtpProbe {
 
     const host = mxHosts[0];
     const from = this.cfg.from;
-    const catchAllProbe = randomLocalPart() + '@' + email.split('@')[1];
+    const domain = email.split('@')[1];
 
-    const res = await probe(host, from, [email, catchAllProbe], this.cfg.timeoutMs);
+    const accepts = (c) => typeof c === 'number' && c >= 200 && c < 300;
+    const rejects = (c) => typeof c === 'number' && c >= 500 && c < 600;
+    const temp = (c) => typeof c === 'number' && c >= 400 && c < 500;
+
+    // If we already know this domain's catch-all status, skip the extra random
+    // RCPT and probe only the real mailbox.
+    const knownCatchAll = this._catchAllCached(domain);
+    const catchAllProbe = knownCatchAll === null ? randomLocalPart() + '@' + domain : null;
+    const recipients = catchAllProbe ? [email, catchAllProbe] : [email];
+
+    const res = await probe(host, from, recipients, this.cfg.timeoutMs);
 
     if (!res.connected) {
       // Never strong enough evidence to mark undeliverable — usually our own
@@ -118,17 +145,24 @@ export class SocketSmtpProbe extends SmtpProbe {
     }
 
     const mailboxCode = res.rcpt[email];
-    const probeCode = res.rcpt[catchAllProbe];
-    const accepts = (c) => typeof c === 'number' && c >= 200 && c < 300;
-    const rejects = (c) => typeof c === 'number' && c >= 500 && c < 600;
-    const temp = (c) => typeof c === 'number' && c >= 400 && c < 500;
+    let isCatchAll;
+    let probeCode;
+    if (catchAllProbe) {
+      probeCode = res.rcpt[catchAllProbe];
+      isCatchAll = accepts(probeCode);
+      // Only cache a confident (accept/reject) result, not a transient temp/no-reply.
+      if (accepts(probeCode) || rejects(probeCode)) this._setCatchAll(domain, isCatchAll);
+    } else {
+      isCatchAll = knownCatchAll;
+      probeCode = undefined;
+    }
 
     return {
       reachable: true,
       mailboxExists: accepts(mailboxCode),
       mailboxRejected: rejects(mailboxCode),
-      temporaryFailure: temp(mailboxCode) || temp(probeCode),
-      catchAll: accepts(probeCode),
+      temporaryFailure: temp(mailboxCode) || (probeCode !== undefined && temp(probeCode)),
+      catchAll: isCatchAll,
       code: mailboxCode,
       probeCode,
       greylisted: temp(mailboxCode),

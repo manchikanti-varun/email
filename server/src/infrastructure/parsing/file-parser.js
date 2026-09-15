@@ -10,20 +10,28 @@ function extractFromRows(rows) {
   if (!rows.length) return { emails: [], columnHint: null };
 
   const firstRow = rows[0].map((c) => String(c ?? '').trim());
-  const headerHasEmailWord = firstRow.some((c) => /e-?mail/i.test(c));
+  const emailHeaderIdx = firstRow.findIndex((c) => /e-?mail/i.test(c));
+  const headerHasEmailWord = emailHeaderIdx !== -1;
 
-  const width = Math.max(...rows.map((r) => r.length));
-  const scores = new Array(width).fill(0);
+  let bestCol;
   const startRow = headerHasEmailWord ? 1 : 0;
-  for (let r = startRow; r < rows.length; r++) {
-    for (let c = 0; c < rows[r].length; c++) {
-      if (EMAIL_LIKE.test(String(rows[r][c] ?? ''))) scores[c]++;
+
+  if (headerHasEmailWord) {
+    // Named email column — skip the O(rows×cols) scoring pass.
+    bestCol = emailHeaderIdx;
+  } else {
+    const width = Math.max(...rows.map((r) => r.length));
+    const scores = new Array(width).fill(0);
+    for (let r = startRow; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        if (EMAIL_LIKE.test(String(rows[r][c] ?? ''))) scores[c]++;
+      }
     }
-  }
-  let bestCol = 0;
-  let best = -1;
-  for (let c = 0; c < width; c++) {
-    if (scores[c] > best) { best = scores[c]; bestCol = c; }
+    bestCol = 0;
+    let best = -1;
+    for (let c = 0; c < width; c++) {
+      if (scores[c] > best) { best = scores[c]; bestCol = c; }
+    }
   }
 
   const emails = [];

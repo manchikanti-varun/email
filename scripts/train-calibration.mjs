@@ -100,7 +100,8 @@ async function main() {
   // maps high/medium/low to nominal probabilities; we score both on TEST.
   const detP = { high: 0.92, medium: 0.75, low: 0.5, unknown: 0.4 };
   const rulePreds = test.map((r) => {
-    const c = String(r.features && r.detConfidence || 'unknown');
+    // buildDataset stores the engine confidence on each record as detConfidence.
+    const c = String(r.detConfidence || 'unknown').toLowerCase();
     return { p: detP[c] ?? 0.4, y: r.label };
   });
   const comparison = compareRuleVsMl({ rulePreds, mlPreds: testPreds });

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { smtpConversation, classifyCode, isTransportFailure } from '../smtp-probe.js';
-import { isCatchAll } from '../catch-all.js';
+import {
+  isCatchAll, getCachedCatchAll, setCachedCatchAll, clearCatchAllCache,
+} from '../catch-all.js';
 import { startFakeMx } from './fake-mx.js';
 
 const opts = (port, recipients) => ({ from: 'v@test', ehlo: 'test', recipients, timeoutMs: 2000, port });
@@ -61,4 +63,15 @@ test('non-catch-all: real accepted, random rejected -> not catchAll', async () =
   const targetStatus = classifyCode(r.rcpt['real@example.com'].code);
   const probeStatus = classifyCode(r.rcpt['random-xyz@example.com'].code);
   assert.equal(isCatchAll({ targetStatus, probeStatus }), false);
+});
+
+test('catch-all domain cache: hit returns stored flag; clear resets', () => {
+  clearCatchAllCache();
+  assert.equal(getCachedCatchAll('example.com'), null);
+  setCachedCatchAll('example.com', false);
+  assert.equal(getCachedCatchAll('example.com'), false);
+  setCachedCatchAll('catch.com', true);
+  assert.equal(getCachedCatchAll('CATCH.com'), true); // domain key is lowercased
+  clearCatchAllCache();
+  assert.equal(getCachedCatchAll('example.com'), null);
 });

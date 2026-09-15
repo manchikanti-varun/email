@@ -29,7 +29,9 @@ export const config = {
   mxPort: int(process.env.SMTP_MX_PORT, 25),
 
   // Bounded concurrency so the worker never opens thousands of sockets.
-  concurrency: int(process.env.SMTP_WORKER_CONCURRENCY, 10),
+  // Default aligned with the main app's VERIFY_CONCURRENCY (12) so bulk jobs
+  // do not queue behind an under-provisioned worker.
+  concurrency: int(process.env.SMTP_WORKER_CONCURRENCY, 12),
 
   // Retry policy for temporary (4xx / greylisting) responses. The worker does
   // NOT block for long retries inside a request; it reports "temporary" and the

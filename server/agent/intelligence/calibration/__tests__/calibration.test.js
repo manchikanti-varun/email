@@ -95,6 +95,15 @@ test('buildDataset: DROPS records without a trustworthy label (never fabricates)
   assert.equal(ds.dropped, 2);
 });
 
+test('buildDataset: preserves engine confidence as detConfidence for rule baseline', () => {
+  const ds = buildDataset([
+    { result: result({ confidence: 'high' }), groundTruth: 'deliverable', groundTruthSource: GROUND_TRUTH_SOURCE.GROUND_TRUTH },
+    { result: catchAllResult({ confidence: 'medium' }), groundTruth: 'deliverable', groundTruthSource: GROUND_TRUTH_SOURCE.REFERENCE },
+  ]);
+  assert.equal(ds.records[0].detConfidence, 'high');
+  assert.equal(ds.records[1].detConfidence, 'medium');
+});
+
 test('buildDataset: label is correctness of verdict, not validity; unknown verdict abstains', () => {
   const ds = buildDataset([
     { result: result(), groundTruth: 'deliverable', groundTruthSource: GROUND_TRUTH_SOURCE.GROUND_TRUTH }, // correct -> 1

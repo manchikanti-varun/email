@@ -67,7 +67,7 @@ export const config = {
   smtp: {
     enabled: bool(process.env.SMTP_ENABLED, true),
     from: process.env.SMTP_FROM || 'verify@example.com',
-    timeoutMs: parseInt(process.env.SMTP_TIMEOUT_MS || '8000', 10),
+    timeoutMs: parseInt(process.env.SMTP_TIMEOUT_MS || '6000', 10),
     // SMTP routing mode: 'auto' (default) tries local port 25 and falls back to
     // the MailHealth SMTP worker; 'local' uses only the local socket probe;
     // 'remote' always uses the worker; 'disabled' performs no SMTP probing.
@@ -82,7 +82,7 @@ export const config = {
     timeoutMs: parseInt(process.env.SMTP_WORKER_TIMEOUT_MS || '12000', 10),
     maxRetries: parseInt(process.env.SMTP_WORKER_MAX_RETRIES || '1', 10),
   },
-  verifyConcurrency: parseInt(process.env.VERIFY_CONCURRENCY || '5', 10),
+  verifyConcurrency: parseInt(process.env.VERIFY_CONCURRENCY || '12', 10),
   bodyLimit: process.env.BODY_LIMIT || '2mb',
   uploadLimitMb: parseInt(process.env.UPLOAD_LIMIT_MB || '25', 10),
   // Starting credits for a newly-registered account.

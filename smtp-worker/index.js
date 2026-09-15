@@ -12,7 +12,10 @@ import dns from 'node:dns/promises';
 
 import { config, assertConfig } from './config.js';
 import { smtpConversation, classifyCode, isTransportFailure } from './smtp-probe.js';
-import { catchAllAddress, isCatchAll } from './catch-all.js';
+import {
+  catchAllAddress, isCatchAll,
+  getCachedCatchAll, setCachedCatchAll,
+} from './catch-all.js';
 import { withRetry, transportErrorRetryable } from './retry.js';
 import { makeAuth, makeRateLimiter, validateVerifyBody } from './security.js';
 import { metrics, checkOutboundPort25, activeJobs } from './health.js';
@@ -80,11 +83,15 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
   metrics.incActive();
   await acquire();
   try {
-    const probeAddr = catchAllAddress(email);
+    // Skip the random catch-all RCPT when we already know this domain's status.
+    const knownCatchAll = getCachedCatchAll(domain);
+    const probeAddr = knownCatchAll === null ? catchAllAddress(email) : null;
+    const recipients = probeAddr ? [email, probeAddr] : [email];
+
     const { result: conv, attempts } = await withRetry(
       () => smtpConversation(mxHost, {
         from: config.mailFrom, ehlo: config.ehloName,
-        recipients: [email, probeAddr], timeoutMs: config.connectTimeoutMs,
+        recipients, timeoutMs: config.connectTimeoutMs,
         port: config.mxPort,
       }),
       { maxRetries: config.maxRetries, shouldRetry: transportErrorRetryable },
@@ -111,10 +118,19 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
     }
 
     const target = conv.rcpt[email] || {};
-    const probe = conv.rcpt[probeAddr] || {};
     const targetStatus = classifyCode(target.code);
-    const probeStatus = classifyCode(probe.code);
-    const catchAll = isCatchAll({ targetStatus, probeStatus });
+    let catchAll;
+    if (probeAddr) {
+      const probe = conv.rcpt[probeAddr] || {};
+      const probeStatus = classifyCode(probe.code);
+      catchAll = isCatchAll({ targetStatus, probeStatus });
+      // Only cache confident accept/reject of the random probe, not temp/no-reply.
+      if (probeStatus === 'accepted' || probeStatus === 'rejected') {
+        setCachedCatchAll(domain, catchAll);
+      }
+    } else {
+      catchAll = knownCatchAll;
+    }
 
     const evidence = {
       status: catchAll ? 'catch-all' : targetStatus, // accepted|rejected|temporary|catch-all|unknown

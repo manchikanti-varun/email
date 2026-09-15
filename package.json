@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit --project frontend/tsconfig.json && tsc --noEmit --project frontend/tsconfig.node.json",
     "lint": "eslint frontend/src",
     "benchmark": "node server/benchmark.js",
+    "export:calibration": "node scripts/export-calibration-dataset.mjs",
     "train:calibration": "node scripts/train-calibration.mjs",
     "test": "node --test"
   },

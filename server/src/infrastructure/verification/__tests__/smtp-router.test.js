@@ -43,6 +43,8 @@ test('auto: local conclusive -> use local, do not call worker', async () => {
   const remote = fakeRemote(ACCEPT);
   remote.check = async () => { workerCalled = true; return { reachable: true, mailboxExists: true, source: 'smtp-worker' }; };
   const r = new SmtpRouter({ mode: 'auto', local: fakeLocal(ACCEPT), remote });
+  // After self-test confirms local port 25, prefer local over worker.
+  r.setLocalPort25(true);
   const out = await r.check('a@x.com', ['mx']);
   assert.equal(out.source, 'local-smtp');
   assert.equal(workerCalled, false);
@@ -72,8 +74,32 @@ test('auto: local blocked + worker also down -> falls back to inconclusive local
 test('learns local port 25 is blocked and skips it next time', async () => {
   let localCalls = 0;
   const local = { check: async () => { localCalls++; return { reachable: false, error: 'timeout', inconclusive: true }; }, selfTest: async () => ({ available: false }) };
-  const r = new SmtpRouter({ mode: 'auto', local, remote: fakeRemote(ACCEPT, { healthy: true }) });
-  await r.check('a@x.com', ['mx']); // first call probes local, learns blocked
-  await r.check('b@x.com', ['mx']); // second call should skip local
+  let healthy = false;
+  const remote = {
+    configured: true,
+    check: async () => ({ ...ACCEPT, source: 'smtp-worker' }),
+    health: async () => ({ available: healthy }),
+    selfTest: async () => ({ available: healthy, reason: 'ok', detail: 'worker' }),
+  };
+  const r = new SmtpRouter({ mode: 'auto', local, remote });
+  // Worker down while local capability unknown → try local and learn blocked.
+  await r.check('a@x.com', ['mx']);
+  healthy = true;
+  r._workerHealth = { at: 0, available: null };
+  await r.check('b@x.com', ['mx']); // must skip local now
   assert.equal(localCalls, 1);
+});
+
+test('auto: while local port 25 is still unknown, prefer healthy worker', async () => {
+  let localCalls = 0;
+  const local = {
+    check: async () => { localCalls++; return { reachable: true, mailboxExists: true }; },
+    selfTest: async () => ({ available: true }),
+  };
+  const r = new SmtpRouter({ mode: 'auto', local, remote: fakeRemote(ACCEPT, { healthy: true }) });
+  // _localPort25 stays null (self-test not run) — must not probe local first.
+  const out = await r.check('a@x.com', ['mx']);
+  assert.equal(localCalls, 0);
+  assert.equal(out.mailboxExists, true);
+  assert.equal(out.source, 'smtp-worker');
 });

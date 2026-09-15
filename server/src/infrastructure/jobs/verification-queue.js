@@ -4,7 +4,7 @@
 // left off. This service depends only on injected collaborators (repositories,
 // the verification engine, the webhook sender) — no direct DB or framework
 // coupling. It preserves the original behavior: bounded-concurrency workers,
-// progress persisted every 5 contacts, list finalization (health snapshot),
+// progress persisted every 25 contacts, list finalization (health snapshot),
 // health-drop alerting, and job.completed / health.dropped webhooks.
 
 export class VerificationQueue {
@@ -96,7 +96,7 @@ export class VerificationQueue {
           // leave unverified; a resume will retry it
         }
         done++;
-        if (done % 5 === 0 || done === emails.length + (job.done || 0)) {
+        if (done % 25 === 0 || done === emails.length + (job.done || 0)) {
           this.jobs.updateProgress(job.id, done);
         }
       }

@@ -61,25 +61,30 @@ export class SqliteContactRepository extends ContactRepository {
     const retryAfter = r.greylisted
       ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
       : null;
-    const tx = this.db.transaction(() => {
-      // ML calibration is OPTIONAL and additive. When a calibration block is
-      // present on the result we persist its reliability estimate; otherwise we
-      // write NULLs. The deterministic verdict columns are unaffected.
-      const cal = r.confidenceCalibration || null;
-      const calScore = cal && Number.isFinite(cal.score) ? cal.score : null;
-      const calLevel = cal && cal.level ? cal.level : null;
-      const calModel = cal && cal.model ? cal.model : null;
-      this._update.run(
-        r.score, r.classification, r.status,
-        JSON.stringify(r.signals), JSON.stringify(r.reasons),
-        r.recommendation, r.greylisted ? 1 : 0, r.provider, retryAfter,
-        r.deliverability, r.confidence, r.recommendedAction,
-        JSON.stringify(r.riskSignals || []),
-        calScore, calLevel, calModel,
-        r.verified_at, contactId
-      );
+    // Single prepared UPDATE — no per-row transaction wrapper (that only added
+    // sync overhead under VERIFY_CONCURRENCY). Use saveResultsBatch for waves.
+    const cal = r.confidenceCalibration || null;
+    const calScore = cal && Number.isFinite(cal.score) ? cal.score : null;
+    const calLevel = cal && cal.level ? cal.level : null;
+    const calModel = cal && cal.model ? cal.model : null;
+    this._update.run(
+      r.score, r.classification, r.status,
+      JSON.stringify(r.signals), JSON.stringify(r.reasons),
+      r.recommendation, r.greylisted ? 1 : 0, r.provider, retryAfter,
+      r.deliverability, r.confidence, r.recommendedAction,
+      JSON.stringify(r.riskSignals || []),
+      calScore, calLevel, calModel,
+      r.verified_at, contactId
+    );
+  }
+
+  /** Persist many results in one SQLite transaction (bulk verify waves). */
+  saveResultsBatch(items) {
+    if (!items || items.length === 0) return;
+    const run = this.db.transaction((rows) => {
+      for (const { contactId, result } of rows) this.saveResult(contactId, result);
     });
-    tx();
+    run(items);
   }
 
   resetVerification(listId) {

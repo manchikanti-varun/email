@@ -70,6 +70,13 @@ export class SmtpRouter extends SmtpProbe {
       return this._skipped('local-blocked-no-worker');
     }
 
+    // Self-test has not finished yet (_localPort25 === null). Prefer a healthy
+    // worker over gambling on a full local timeout per concurrent email.
+    if (this._localPort25 === null && this.remote && this.remote.configured) {
+      if (await this._workerAvailable()) return this._viaRemote(email, mxHosts);
+      // Worker unavailable — fall through and try local.
+    }
+
     const localRes = this._tagLocal(await this.local.check(email, mxHosts));
 
     // Local produced a conclusive answer -> use it.

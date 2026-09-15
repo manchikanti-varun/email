@@ -1,0 +1,18 @@
+[
+  {
+    "email": "deliverable-seed@yourdomain.com",
+    "groundTruth": "deliverable",
+    "groundTruthSource": "GROUND_TRUTH"
+  },
+  {
+    "email": "bounces@invalid-mailbox.example",
+    "groundTruth": "undeliverable",
+    "groundTruthSource": "GROUND_TRUTH"
+  },
+  {
+    "email": "sales@catch-all-corp.example",
+    "groundTruth": "deliverable",
+    "groundTruthSource": "REFERENCE",
+    "referenceVerdict": "deliverable"
+  }
+]

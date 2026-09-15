@@ -25,7 +25,7 @@ export const GROUND_TRUTH_SOURCE = Object.freeze({
 
 // A single standardized record, matching the task's required shape plus the
 // derived learning target.
-function makeRecord({ features, byName, mailhealthVerdict, referenceVerdict, groundTruth, source, timestamp, email }) {
+function makeRecord({ features, byName, mailhealthVerdict, referenceVerdict, groundTruth, source, timestamp, email, detConfidence }) {
   const gt = toDeliverability(groundTruth);
   const mh = toDeliverability(mailhealthVerdict);
   // Correctness label: did the engine's verdict match ground truth?
@@ -42,6 +42,9 @@ function makeRecord({ features, byName, mailhealthVerdict, referenceVerdict, gro
     groundTruthSource: source,
     label: correct,          // 1 = engine correct, 0 = engine wrong, null = abstain
     scorable,
+    // Engine's own confidence string (high|medium|low|unknown) for rule-vs-ML
+    // baseline comparison in the train script — not a model feature.
+    detConfidence: detConfidence || 'unknown',
     timestamp: timestamp || new Date().toISOString(),
     email: email || null,
     domain: domainOf(email || ''),
@@ -89,6 +92,7 @@ export function buildDataset(items = []) {
       source,
       timestamp: it.timestamp || result.verified_at,
       email: it.email || result.email,
+      detConfidence: String(result.confidence || it.detConfidence || 'unknown').toLowerCase(),
     });
     sources[source] = (sources[source] || 0) + 1;
     records.push(rec);
