@@ -66,7 +66,7 @@ export class MailHealthAgent {
     if (!this.isEnabled()) {
       return this._response({
         conversationId: convId,
-        message: 'MailHealth AI is currently disabled. All verification and list features work normally without it. An administrator can enable it by setting AI_ENABLED=true.',
+        message: 'MailHealth AI is currently disabled. All verification and list features work normally without it. An administrator can re-enable it by setting AI_ENABLED=true (or removing AI_ENABLED, since it is on by default).',
         generatedAt, model: 'disabled', meta: { mode: 'disabled' },
       });
     }

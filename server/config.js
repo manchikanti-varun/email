@@ -89,12 +89,14 @@ export const config = {
   signupCredits: parseInt(process.env.SIGNUP_CREDITS || '1000', 10),
 
   // ---- AI Agent (optional intelligence/orchestration layer) --------------
-  // The whole agent is OFF by default. When disabled the app behaves exactly
-  // as before — the /api/agent endpoint returns a graceful "unavailable"
-  // message and no external calls are ever made. The deterministic
-  // verification engine remains the sole source of truth regardless.
+  // The agent is ON by default. With no AI_PROVIDER/AI_API_KEY/AI_MODEL set it
+  // runs in heuristic (no-LLM) mode — deterministic tool selection with NO
+  // external calls. Set AI_ENABLED=false to disable the /api/agent endpoint
+  // entirely. Configure a provider + key + model to enable real LLM planning.
+  // The deterministic verification engine remains the sole source of truth
+  // regardless of this setting.
   ai: {
-    enabled: bool(process.env.AI_ENABLED, false),
+    enabled: bool(process.env.AI_ENABLED, true),
     // Provider adapter: 'openai' | 'anthropic' | 'openai-compatible'. Empty ->
     // the agent runs in heuristic (no-LLM) planning mode when AI_ENABLED=true.
     provider: (process.env.AI_PROVIDER || '').trim().toLowerCase(),
