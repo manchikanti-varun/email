@@ -24,14 +24,21 @@ export function campaignRisk({ stats, preflight, history }) {
 
   const safePct = round1((safe / total) * 100);
   const problemPct = round1(((review + remove + unknown) / total) * 100);
-  const catchUnknownPct = round1(((catchAll + unknown) / total) * 100);
+  // Share of recipients NOT in the Safe bucket. Derived from the SAME
+  // classification buckets shown in the cleaning summary, so the risk card and
+  // the summary always reconcile (safe + review + remove + unknown = total).
+  // Catch-all contacts already live inside review/unknown, so we do NOT add
+  // them again here — that previously double-counted and produced a percentage
+  // that couldn't be reconciled with the buckets.
+  const notSafePct = round1(((review + remove + unknown) / total) * 100);
 
-  // Risk score 0-100 (higher = riskier). Weighted from measured shares.
+  // Risk score 0-100 (higher = riskier). Weighted from the classification
+  // buckets only (they partition the list); catch-all is a characteristic
+  // already reflected in review/unknown, so it is not added separately.
   let riskScore = round1(
     (remove / total) * 100 * 0.5 +
     (unknown / total) * 100 * 0.3 +
-    (review / total) * 100 * 0.15 +
-    (catchAll / total) * 100 * 0.2
+    (review / total) * 100 * 0.2
   );
 
   // Trend nudges risk: a declining list is riskier than a stable one.
@@ -44,10 +51,16 @@ export function campaignRisk({ stats, preflight, history }) {
   const reasoning = [];
   const keyRisks = [];
   reasoning.push(fact(`Of ${total} recipients: ${safe} safe (${safePct}%), ${review} review, ${remove} remove, ${unknown} unknown.`));
-  if (catchUnknownPct > 0) {
+  if (notSafePct > 0) {
     reasoning.push(inference(
-      `${catchUnknownPct}% of recipients are catch-all or unknown, meaning their mailboxes could not be independently confirmed.`,
-      catchUnknownPct >= 10 ? CONFIDENCE.HIGH : CONFIDENCE.MEDIUM
+      `${notSafePct}% of recipients are not in the Safe bucket (review, remove, or unknown), so they are not campaign-ready as-is.`,
+      notSafePct >= 10 ? CONFIDENCE.HIGH : CONFIDENCE.MEDIUM
+    ));
+  }
+  if (catchAll > 0) {
+    reasoning.push(inference(
+      `${catchAll} of these are on catch-all domains, whose mailboxes cannot be independently confirmed.`,
+      CONFIDENCE.MEDIUM
     ));
   }
   if (remove > 0) keyRisks.push(`${remove} recipients are classified Remove (strong evidence they cannot receive mail).`);
@@ -78,8 +91,9 @@ export function campaignRisk({ stats, preflight, history }) {
   }
   if (preflight?.verdict) reasoning.push(fact(`Deterministic preflight verdict: ${preflight.verdict}`));
 
-  const why = `Campaign risk is ${riskLevel} because ${catchUnknownPct}% of recipients are catch-all or unknown` +
-    (delta && delta.healthDelta < 0 ? ` and list health declined by ${Math.abs(delta.healthDelta)} points since the previous verification.` : '.') +
+  const why = `Campaign risk is ${riskLevel} because ${notSafePct}% of recipients are not in the Safe bucket ` +
+    `(${review} review, ${remove} remove, ${unknown} unknown), so only the ${safe} Safe recipients are campaign-ready` +
+    (delta && delta.healthDelta < 0 ? `, and list health declined by ${Math.abs(delta.healthDelta)} points since the previous verification.` : '.') +
     ' Inbox placement is never guaranteed; this reflects list quality only.';
 
   return {
