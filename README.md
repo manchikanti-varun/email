@@ -154,8 +154,9 @@ server/
     data.js           disposable/role/free/typo data (+ feed loader)
   routes/
     auth.js  verify.js  lists.js  campaign.js  integrations.js
-public/
-  index.html styles.css app.js api.js ui.js
+frontend/                  React + TypeScript app (Vite); builds into public/
+  src/  index.html
+public/                    generated build output (served by the Node server)
 data/feeds/*.txt         optional disposable.txt / roles.txt feeds
 ```
 

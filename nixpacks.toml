@@ -3,3 +3,8 @@
 # needed. python3 + gcc are included anyway as a safety net for any native rebuild.
 [phases.setup]
 nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
+
+# Build the React/Vite frontend into public/ so the Node server can serve it.
+# Nixpacks installs devDependencies (react, vite, typescript) during build.
+[phases.build]
+cmds = ["npm run build"]

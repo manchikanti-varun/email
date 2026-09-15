@@ -1,5 +1,10 @@
 node_modules/
 data/
+
+# Generated frontend build output (built by `npm run build` from frontend/).
+# Both Vercel and Railway build this during deploy; the source lives in frontend/.
+public/
+frontend/public/config.js
 *.db
 *.db-journal
 *.db-wal

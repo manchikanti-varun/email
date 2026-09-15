@@ -1,8 +1,8 @@
-# Vercel hosts only the static frontend (public/). Keep the backend out.
+# Vercel builds the static frontend (frontend/ -> public/). Keep the backend
+# and local data out of the deployment.
 server
 data
 node_modules
-benchmark
 *.db
 *.db-shm
 *.db-wal
