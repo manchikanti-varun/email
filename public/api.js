@@ -93,4 +93,25 @@ export const api = {
   agentChat: (payload) => request('POST', '/agent/chat', payload),
   agentHistory: (conversationId) =>
     request('GET', '/agent/history' + (conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : '')),
+
+  // MailHealth AI Intelligence Layer (deterministic-first analysis)
+  aiCampaignRisk: (listId) => request('POST', '/ai/campaign-risk', { listId }),
+  aiHealthAnalysis: (id) => request('GET', `/ai/lists/${id}/health-analysis`),
+  aiHealthPrediction: (id) => request('GET', `/ai/lists/${id}/health-prediction`),
+  aiAnomalies: (id) => request('GET', `/ai/lists/${id}/anomalies`),
+  aiDomains: (id) => request('GET', `/ai/lists/${id}/domains`),
+  aiCleaning: (id) => request('GET', `/ai/lists/${id}/cleaning`),
+  aiReverificationPriority: (id) => request('GET', `/ai/lists/${id}/reverification-priority`),
+  aiBusinessInsights: (id) => request('GET', `/ai/lists/${id}/business-insights`),
+  aiEmailExplanation: (id, email, mode = 'simple') =>
+    request('GET', `/ai/lists/${id}/contacts/${encodeURIComponent(email)}/explanation?mode=${mode}`),
+  aiCreditOptimization: (listId) => request('GET', `/ai/credits/optimization?listId=${encodeURIComponent(listId)}`),
+  aiIncidents: (listId) => request('GET', '/ai/incidents' + (listId ? `?listId=${encodeURIComponent(listId)}` : '')),
+  aiInvestigate: (listId, question) => request('POST', '/ai/investigate', { listId, question }),
+  aiBenchmarkAnalysis: (benchmark) => request('POST', '/ai/benchmark-analysis', { benchmark }),
+  // ML Confidence Calibration (additive).
+  aiConfidence: (id, email) =>
+    request('GET', `/ai/lists/${id}/contacts/${encodeURIComponent(email)}/confidence`),
+  aiCalibrationStatus: () => request('GET', '/ai/calibration/status'),
+  aiCalibrationBenchmark: (dataset) => request('POST', '/ai/calibration/benchmark', { dataset }),
 };

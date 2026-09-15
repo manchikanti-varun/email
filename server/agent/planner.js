@@ -69,6 +69,44 @@ export class Planner {
 
     const id = listId || (result('get_lists')?.lists?.[0]?.id) || context.lists?.[0]?.id;
 
+    // Intent: investigate WHY results changed / why so many unknown. Runs the
+    // composite investigation (anomaly + incident + domain) for a root cause.
+    if ((/\b(why|investigate|reason|cause|explain)\b/.test(msg) && /\b(unknown|verification|results?|change|changed|increase|increased|spike|jump)\b/.test(msg))
+        || /\b(anomal|unusual|weird|strange)\b/.test(msg)) {
+      if (!has('investigate_verification_issue')) return tool('investigate_verification_issue', { listId: id, question: userMessage }, 'Investigating the change.');
+      return final(this._investigationAnswer(result('investigate_verification_issue')));
+    }
+
+    // Intent: worst / problem domains.
+    if (/\bdomain/.test(msg)) {
+      if (!has('analyze_domain')) return tool('analyze_domain', { listId: id, limit: 10 }, 'Analyzing domains.');
+      return final(this._domainAnswer(result('analyze_domain')));
+    }
+
+    // Intent: forecast / prediction.
+    if (/\b(predict|forecast|projection|future|trend|next month|30 days|90 days)\b/.test(msg)) {
+      if (!has('predict_list_health')) return tool('predict_list_health', { listId: id }, 'Projecting future health.');
+      return final(this._predictionAnswer(result('predict_list_health')));
+    }
+
+    // Intent: credit optimisation / saving credits.
+    if (/\b(credit|save|efficient|budget|cost)\b/.test(msg) && !/\bre-?verif/.test(msg)) {
+      if (!has('optimize_verification_credits')) return tool('optimize_verification_credits', { listId: id }, 'Optimising credit use.');
+      return final(this._creditAnswer(result('optimize_verification_credits')));
+    }
+
+    // Intent: prioritise re-verification.
+    if (/\b(priorit|which contacts|what should i (re-?verify|check)|worth verifying)\b/.test(msg)) {
+      if (!has('prioritize_reverification')) return tool('prioritize_reverification', { listId: id, limit: 100 }, 'Prioritising re-verification.');
+      return final(this._priorityAnswer(result('prioritize_reverification')));
+    }
+
+    // Intent: business insights.
+    if (/\b(insight|business|summary|overview|report)\b/.test(msg)) {
+      if (!has('generate_business_insights')) return tool('generate_business_insights', { listId: id }, 'Generating business insights.');
+      return final(this._insightsAnswer(result('generate_business_insights')));
+    }
+
     // Intent: cleaning / deletion (destructive) -> plan first, never auto-delete.
     if (/\b(clean|delete|remove|purge)\b/.test(msg)) {
       if (!has('get_cleaning_plan')) return tool('get_cleaning_plan', { listId: id }, 'Building the cleaning plan.');
@@ -91,7 +129,13 @@ export class Planner {
       );
     }
 
-    // Intent: readiness / preflight.
+    // Intent: explicit campaign-risk scoring (richer than preflight).
+    if (/\b(campaign risk|risk (score|level)|risk of sending|how risky)\b/.test(msg)) {
+      if (!has('get_campaign_risk')) return tool('get_campaign_risk', { listId: id }, 'Assessing campaign risk.');
+      return final(this._campaignRiskAnswer(result('get_campaign_risk')));
+    }
+
+    // Intent: readiness / preflight (preserved: uses health + preflight tools).
     if (/\b(ready to send|preflight|can i send|safe to send|good to send)\b/.test(msg)) {
       if (!has('get_list_health')) return tool('get_list_health', { listId: id }, 'Checking list health.');
       if (!has('run_campaign_preflight')) return tool('run_campaign_preflight', { listId: id }, 'Running campaign preflight.');
@@ -169,6 +213,59 @@ export class Planner {
       ? `remove the ${c.remove} invalid contacts and review the ${c.review} flagged ones before sending.`
       : 'the list looks clean; you can proceed.'));
     return lines.join('\n\n');
+  }
+
+  // ---- AI Intelligence answer formatters ---------------------------------
+  _campaignRiskAnswer(r) {
+    if (!r || r.available === false) return r?.message || 'This list has no verification results yet, so I can\'t assess campaign risk. Run verification first.';
+    const lines = [`Campaign risk: ${r.riskLevel} (score ${r.riskScore}/100).`];
+    lines.push(`Recipients — safe ${r.safeRecipients}, review ${r.reviewRecipients}, remove ${r.removeRecipients}, unknown ${r.unknownRecipients}. Recommended send list: ${r.recommendedSendCount}.`);
+    if (r.summary) lines.push(r.summary);
+    if (r.recommendations?.length) lines.push('Recommendation: ' + r.recommendations.map((x) => x.text).join(' '));
+    return lines.join('\n\n');
+  }
+
+  _investigationAnswer(r) {
+    if (!r || r.available === false) return r?.finding || 'I don\'t have enough evidence to investigate this yet.';
+    const lines = [`Finding: ${r.finding}`];
+    if (r.evidence?.length) lines.push('Evidence: ' + r.evidence.map((e) => e.text).join(' '));
+    if (r.possibleCauses?.length) lines.push('Possible cause: ' + r.possibleCauses.join(' '));
+    lines.push(`Confidence: ${r.confidence}.`);
+    if (r.recommendedAction) lines.push('Recommended action: ' + r.recommendedAction);
+    return lines.join('\n\n');
+  }
+
+  _domainAnswer(r) {
+    if (!r || r.available === false || !r.domains?.length) return r?.message || 'No domain-level problems stand out, or the list isn\'t verified yet.';
+    const top = r.domains.slice(0, 5).map((d, i) => `${i + 1}. ${d.summary}`).join('\n');
+    return `Top problem domains (of ${r.domainCount}):\n${top}\n\nRecommendation: ${r.domains[0].recommendedAction}`;
+  }
+
+  _predictionAnswer(r) {
+    if (!r || r.available === false) return r?.message || 'Insufficient historical data for reliable prediction.';
+    const p = r.predictionRanges || {};
+    return `Health forecast (current ${r.currentScore}/100, trend ${r.trend}, confidence ${r.confidence}):\n` +
+      `• 30 days: ${p['30d']}\n• 60 days: ${p['60d']}\n• 90 days: ${p['90d']}\n\n` +
+      `${r.note}` + (r.warning ? `\n\n⚠ ${r.warning}` : '');
+  }
+
+  _creditAnswer(r) {
+    if (!r || r.available === false) return r?.message || 'I need a verified list to optimise credit use.';
+    return `Credit optimisation: you have ${r.availableCredits} credits and ${r.dueContacts} contacts due. ` +
+      (r.recommendations?.map((x) => x.text).join(' ') || '') + `\n\n${r.note}`;
+  }
+
+  _priorityAnswer(r) {
+    if (!r || r.available === false) return r?.message || 'I need a verified list to prioritise re-verification.';
+    const b = r.buckets || {};
+    return `Re-verification priority across ${r.total} contacts: ${b.URGENT || 0} urgent, ${b.HIGH || 0} high, ${b.MEDIUM || 0} medium, ${b.LOW || 0} low.\n\n${r.note}`;
+  }
+
+  _insightsAnswer(r) {
+    if (!r || r.available === false) return r?.message || 'I need a verified list to generate insights.';
+    const facts = (r.insights || []).map((s) => s.text).join(' ');
+    const recs = (r.recommendations || []).map((s) => s.text).join(' ');
+    return `${facts}\n\nRecommendation: ${recs}\n\n${r.disclaimer}`;
   }
 }
 

@@ -53,6 +53,18 @@ import {
   GetAccountCredits, GetListSummary, GetFilteredContacts, EstimateVerificationCost,
 } from './application/agent-support-use-cases.js';
 import { AgentChat, AgentHistory } from './application/agent-use-cases.js';
+import {
+  GetCampaignRisk, GetHealthAnalysis, GetHealthPrediction, GetListAnomalies,
+  GetDomainIntelligence, GetSmartCleaning, GetReverificationPriority,
+  GetCreditOptimization, GetEmailExplanation, GetBusinessInsights,
+  InvestigateVerification, DetectIncidents, AnalyzeBenchmark,
+  CalibrateVerificationConfidence, CalibrateSingleResult,
+  GetCalibrationBenchmark, GetCalibrationDrift,
+} from './application/ai-use-cases.js';
+
+// ML Confidence Calibration layer (additive; downstream of the deterministic
+// engine). Loads a trained model artifact; falls back safely when unavailable.
+import { ConfidenceCalibrator, loadModel } from '../agent/intelligence/calibration/index.js';
 
 // AI agent runtime (optional intelligence/orchestration layer)
 import { AiProvider } from '../agent/provider.js';
@@ -105,6 +117,17 @@ export function createContainer() {
     dnsResolver, smtpProbe, getProvider: () => provider, referenceData,
   });
 
+  // --- ML Confidence Calibration -----------------------------------------
+  // Loads the shipped model artifact (or an honest "untrained" placeholder).
+  // The calibrator is DOWNSTREAM of the engine and never alters verdicts; when
+  // the model is unavailable it reports the deterministic confidence. Any
+  // load/inference failure degrades gracefully to the deterministic path.
+  const calibrationModel = loadModel();
+  const calibrator = new ConfidenceCalibrator({
+    model: calibrationModel,
+    minPerformance: config.ai?.calibrationMinAccuracy ?? 0,
+  });
+
   // --- Security services --------------------------------------------------
   const passwordHasher = new BcryptPasswordHasher();
   const tokenService = new JwtTokenService(config.jwtSecret);
@@ -121,6 +144,7 @@ export function createContainer() {
     verificationEngine,
     webhookSender,
     summarize,
+    calibrator,
     concurrency: config.verifyConcurrency,
   });
   const scheduler = new Scheduler({
@@ -136,7 +160,7 @@ export function createContainer() {
     loginUser: new LoginUser({ users, passwordHasher, tokenService }),
     rotateApiKey: new RotateApiKey({ users, apiKeyService }),
 
-    verifySingleEmail: new VerifySingleEmail({ users, verificationEngine }),
+    verifySingleEmail: new VerifySingleEmail({ users, verificationEngine, calibrator }),
 
     uploadList: new UploadList({ lists, contacts, parseUpload }),
     startListVerification: new StartListVerification({ lists, contacts, users, queue }),
@@ -176,7 +200,7 @@ export function createContainer() {
     registry: toolRegistry,
     audit: agentAudit,
     // Factory: per-request tool execution context bound to the current user.
-    toolContextFactory: (user) => ({ userId: user.id, useCases, config }),
+    toolContextFactory: (user) => ({ userId: user.id, useCases, config: { ...config, calibrationStatus: calibrator.status() } }),
   });
   useCases.agentChat = new AgentChat({ agent });
   useCases.agentHistory = new AgentHistory({ audit: agentAudit });
@@ -196,6 +220,32 @@ export function createContainer() {
     realProvider: provider.name !== 'none',
   };
 
+  // --- AI Intelligence Layer use cases ------------------------------------
+  // Additive analysis on top of the deterministic engine. Each fetches real
+  // data via the existing use-cases above (ownership enforced) and delegates
+  // interpretation to the pure intelligence modules. No LLM required; the
+  // agent may narrate these results when a model is configured.
+  Object.assign(useCases, {
+    aiCampaignRisk: new GetCampaignRisk({ getListDetail: useCases.getListDetail, campaignPreflight: useCases.campaignPreflight }),
+    aiHealthAnalysis: new GetHealthAnalysis({ getListDetail: useCases.getListDetail }),
+    aiHealthPrediction: new GetHealthPrediction({ getListDetail: useCases.getListDetail }),
+    aiListAnomalies: new GetListAnomalies({ getListDetail: useCases.getListDetail }),
+    aiDomainIntelligence: new GetDomainIntelligence({ getListDetail: useCases.getListDetail }),
+    aiSmartCleaning: new GetSmartCleaning({ getListDetail: useCases.getListDetail, getCleaningPlan: useCases.getCleaningPlan }),
+    aiReverificationPriority: new GetReverificationPriority({ getListDetail: useCases.getListDetail }),
+    aiCreditOptimization: new GetCreditOptimization({ getListDetail: useCases.getListDetail, getAccountCredits: useCases.getAccountCredits }),
+    aiEmailExplanation: new GetEmailExplanation({ getListDetail: useCases.getListDetail }),
+    aiBusinessInsights: new GetBusinessInsights({ getListDetail: useCases.getListDetail }),
+    aiInvestigate: new InvestigateVerification({ getListDetail: useCases.getListDetail, verifyCapability }),
+    aiIncidents: new DetectIncidents({ getListDetail: useCases.getListDetail, getLists: useCases.getLists, verifyCapability }),
+    aiBenchmarkAnalysis: new AnalyzeBenchmark(),
+    // ML Confidence Calibration use-cases (additive; verdict-preserving).
+    aiConfidenceCalibration: new CalibrateVerificationConfidence({ getListDetail: useCases.getListDetail, calibrator }),
+    aiCalibrateResult: new CalibrateSingleResult({ calibrator }),
+    aiCalibrationBenchmark: new GetCalibrationBenchmark(),
+    aiCalibrationDrift: new GetCalibrationDrift(),
+  });
+
   return {
     config,
     db,
@@ -205,6 +255,8 @@ export function createContainer() {
     queue,
     scheduler,
     verifyCapability,
+    calibrator,
+    calibrationStatus: calibrator.status(),
     useCases,
     authRequired,
     cookies,

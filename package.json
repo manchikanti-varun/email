@@ -11,6 +11,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "benchmark": "node server/benchmark.js",
+    "train:calibration": "node scripts/train-calibration.mjs",
     "test": "node --test"
   },
   "keywords": [

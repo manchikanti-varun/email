@@ -139,6 +139,11 @@ ensureColumn('contacts', 'deliverability', 'deliverability TEXT');
 ensureColumn('contacts', 'confidence', 'confidence TEXT');
 ensureColumn('contacts', 'recommended_action', 'recommended_action TEXT');
 ensureColumn('contacts', 'risk_signals', 'risk_signals TEXT');
+// ML Confidence Calibration (additive; nullable). Stores the calibrated
+// reliability estimate WITHOUT ever altering the deterministic verdict columns.
+ensureColumn('contacts', 'calibrated_confidence', 'calibrated_confidence REAL');
+ensureColumn('contacts', 'calibration_level', 'calibration_level TEXT');
+ensureColumn('contacts', 'calibration_model', 'calibration_model TEXT');
 ensureColumn('users', 'api_key_hash', 'api_key_hash TEXT');
 ensureColumn('users', 'api_key_prefix', 'api_key_prefix TEXT');
 

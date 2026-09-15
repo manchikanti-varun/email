@@ -115,6 +115,57 @@ export function confidenceLabel(c) {
   return `<span style="color:${color};text-transform:capitalize">${esc(c || 'unknown')}</span>`;
 }
 
+// ---- ML calibrated confidence (additive; renders nothing if absent) --------
+// Explains three things together (task §24): what the engine found (already
+// shown elsewhere), HOW confident MailHealth is, and WHY. Never overrides the
+// deterministic verdict — it sits beside it.
+const CAL_LEVEL_COLOR = { HIGH: 'var(--safe)', MEDIUM: 'var(--review)', LOW: 'var(--catchall)' };
+export function calibratedConfidence(cal) {
+  if (!cal || typeof cal !== 'object') return '';
+  const pct = Number.isFinite(cal.score) ? Math.round(cal.score * 100) : null;
+  const color = CAL_LEVEL_COLOR[cal.level] || 'var(--muted)';
+  const modelTag = cal.available
+    ? `<span class="pill" style="margin-left:6px" title="Calibration model version">${esc(cal.model || 'ml')}</span>`
+    : `<span class="pill" style="margin-left:6px;opacity:.7" title="ML model unavailable — showing deterministic confidence">deterministic</span>`;
+
+  const evidence = Array.isArray(cal.evidence) && cal.evidence.length
+    ? `<ul style="margin:6px 0 0;padding-left:2px;list-style:none;font-size:12px">${
+      cal.evidence.slice(0, 6).map((e) =>
+        `<li style="margin-bottom:2px"><span style="color:${e.sign === '+' ? 'var(--safe)' : 'var(--catchall)'};font-weight:700">${esc(e.sign)}</span> ${esc(e.text)}</li>`
+      ).join('')}</ul>`
+    : '';
+
+  const warn = cal.disagreement && cal.disagreement.warning
+    ? `<div class="reasons" style="border-color:var(--catchall);margin-top:8px"><b>⚠ Review / calibration case:</b> ${esc(cal.disagreement.warning)}</div>`
+    : '';
+
+  const unavailable = cal.available === false && cal.message
+    ? `<div class="muted" style="font-size:11px;margin-top:4px">${esc(cal.message.replace(/\n/g, ' · '))}</div>`
+    : '';
+
+  return `
+    <div class="card" style="margin-top:14px;background:var(--panel-2,transparent)">
+      <div class="stat-label">MailHealth confidence in this result ${modelTag}</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin:4px 0">
+        <span style="font-size:22px;font-weight:700;color:${color}">${pct == null ? '—' : pct + '%'}</span>
+        <span style="color:${color};font-weight:600">${esc(cal.level || '—')}</span>
+      </div>
+      <div class="muted" style="font-size:12px">${esc(cal.interpretation || '')}</div>
+      ${evidence}
+      ${warn}
+      ${unavailable}
+    </div>`;
+}
+
+// Compact inline calibrated badge for tables (level + %). Renders nothing if absent.
+export function calibratedBadge(cal) {
+  if (!cal || typeof cal !== 'object' || cal.level == null) return '';
+  const pct = Number.isFinite(cal.score) ? Math.round(cal.score * 100) : null;
+  const color = CAL_LEVEL_COLOR[cal.level] || 'var(--muted)';
+  const title = cal.available ? `Calibrated (${esc(cal.model || 'ml')})` : 'Deterministic fallback';
+  return `<span class="pill" title="${title}" style="color:${color}">${esc(cal.level)}${pct == null ? '' : ' ' + pct + '%'}</span>`;
+}
+
 export function riskChips(riskSignals) {
   if (!riskSignals || !riskSignals.length) {
     return '<span class="muted">None detected</span>';

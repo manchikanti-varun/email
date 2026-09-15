@@ -9,6 +9,10 @@ export function toDomainContact(row) {
     reasons: safeParse(row.reasons),
     riskSignals: safeParse(row.risk_signals),
     recommendedAction: row.recommended_action,
+    // ML calibration (additive; present only after a calibrated verification).
+    calibratedConfidence: row.calibrated_confidence ?? null,
+    calibrationLevel: row.calibration_level ?? null,
+    calibrationModel: row.calibration_model ?? null,
   };
 }
 

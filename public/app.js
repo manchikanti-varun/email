@@ -1,6 +1,6 @@
 import { api, setToken, setUnauthorizedHandler } from './api.js';
 import { h, esc, toast, scoreRing, metricBar, badge, signalRow, scoreColor, lineChart, stackedBar,
-  actionBadge, deliverabilityLabel, confidenceLabel, riskChips,
+  actionBadge, deliverabilityLabel, confidenceLabel, riskChips, calibratedConfidence, calibratedBadge,
   navIcon, skeletonCards, skeletonRows } from './ui.js';
 
 const app = document.getElementById('app');
@@ -392,6 +392,7 @@ function renderDetail(content, detail, id) {
     </div>
 
     ${renderPreflightCard(id)}
+    ${renderAiInsightsCard(id)}
     ${history.length > 1 ? renderHistoryWithChart(history) : ''}
 
     <div class="card" style="margin-top:16px">
@@ -411,6 +412,7 @@ function renderDetail(content, detail, id) {
     </div>`;
 
   loadPreflight(id, content);
+  loadAiInsights(id, content);
 
   content.querySelector('#reverify').onclick = async () => {
     if (!confirm('Re-verify all contacts? This recharges credits for the whole list.')) return;
@@ -434,14 +436,14 @@ function renderDetail(content, detail, id) {
     const f = filter.value;
     const rows = contacts.filter((c) =>
       (f === 'all' || c.classification === f) && (!q || c.email.includes(q)));
-    renderContactTable(tableEl, rows);
+    renderContactTable(tableEl, rows, id);
   }
   search.oninput = draw;
   filter.onchange = draw;
   draw();
 }
 
-function renderContactTable(el, rows) {
+function renderContactTable(el, rows, listId) {
   if (!rows.length) { el.innerHTML = `<div class="empty">No matching contacts.</div>`; return; }
   el.innerHTML = `
     <table><thead><tr>
@@ -451,7 +453,7 @@ function renderContactTable(el, rows) {
       <tr data-i="${i}">
         <td class="email-cell">${esc(c.email)}</td>
         <td>${deliverabilityLabel(c.deliverability || c.status)}<span class="muted" style="font-size:11px"> · ${c.deliverabilityScore ?? c.score ?? '—'}</span></td>
-        <td>${confidenceLabel(c.confidence)}</td>
+        <td>${confidenceLabel(c.confidence)}${c.calibrationLevel ? ' ' + calibratedBadge({ level: c.calibrationLevel, score: c.calibratedConfidence, model: c.calibrationModel, available: c.calibrationModel && c.calibrationModel !== 'deterministic-fallback' }) : ''}</td>
         <td>${riskSummary(c.riskSignals)}</td>
         <td>${actionBadge(c.recommendedAction || c.classification)}</td>
       </tr>`).join('')}
@@ -460,7 +462,7 @@ function renderContactTable(el, rows) {
 
   el.querySelectorAll('tr[data-i]').forEach((tr) => {
     tr.style.cursor = 'pointer';
-    tr.onclick = () => showContactModal(rows[parseInt(tr.dataset.i, 10)]);
+    tr.onclick = () => showContactModal(rows[parseInt(tr.dataset.i, 10)], listId);
   });
 }
 
@@ -472,7 +474,7 @@ function riskSummary(riskSignals) {
   return `<span class="pill" title="${esc(riskSignals.map(r => r.label).join(', '))}">${esc(first)}${extra}</span>`;
 }
 
-function showContactModal(c) {
+function showContactModal(c, listId) {
   const modal = h(`
     <div class="modal-backdrop">
       <div class="modal-card" style="max-width:560px">
@@ -489,6 +491,8 @@ function showContactModal(c) {
         <div class="stat-label">Risk signals</div>
         <div style="margin:4px 0 12px">${riskChips(c.riskSignals)}</div>
 
+        <div id="calibration">${c.calibrationLevel ? calibratedConfidence({ level: c.calibrationLevel, score: c.calibratedConfidence, model: c.calibrationModel, available: c.calibrationModel && c.calibrationModel !== 'deterministic-fallback', interpretation: '', evidence: [] }) : ''}</div>
+
         <h3 style="margin:14px 0 6px;font-size:13px">Technical evidence</h3>
         ${(c.signals || []).map(signalRow).join('')}
         <div class="reasons"><b>Why this classification?</b><ul style="margin:8px 0 0;padding-left:18px">
@@ -501,6 +505,18 @@ function showContactModal(c) {
   document.body.appendChild(modal);
   modal.querySelector('#close').onclick = () => modal.remove();
   modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  // Fetch the full explainable calibration (evidence + interpretation +
+  // disagreement) live. Degrades quietly if the endpoint or model is
+  // unavailable — the deterministic verdict above is unaffected.
+  if (listId && c.email) {
+    api.aiConfidence(listId, c.email)
+      .then((res) => {
+        const box = modal.querySelector('#calibration');
+        if (box && res && res.confidence) box.innerHTML = calibratedConfidence(res.confidence);
+      })
+      .catch(() => { /* silent: confidence is additive */ });
+  }
 }
 
 // ---- Preflight ----
@@ -535,6 +551,133 @@ async function loadPreflight(id, content) {
         </div>
       </div>`;
   } catch { /* not verified yet */ }
+}
+
+// ---- AI Intelligence panel ----
+// Deterministic-first analysis. Every statement is tagged (FACT / INFERENCE /
+// PREDICTION / RECOMMENDATION) with a confidence, so verified truth stays
+// distinct from interpretation. Loads independent cards in parallel; each fails
+// quietly (e.g. list not verified yet) without breaking the page.
+function renderAiInsightsCard(id) {
+  return `
+    <div class="card" id="aiInsights" style="margin-top:16px">
+      <div class="toolbar"><h3 style="margin:0">🧠 AI Insights</h3><div class="spacer"></div>
+        <span class="pill" title="Deterministic analysis on top of the verification engine. AI never changes verification results.">deterministic-first</span></div>
+      <p class="muted" id="aiInsightsStatus">Analyzing…</p>
+      <div class="grid cols-2" id="aiInsightsBody" style="display:none">
+        <div id="aiRisk"></div>
+        <div id="aiHealth"></div>
+        <div id="aiDomains"></div>
+        <div id="aiForecast"></div>
+      </div>
+      <div id="aiAnomalyRow" style="margin-top:12px"></div>
+      <div style="margin-top:12px">
+        <a class="btn ghost sm" href="#/agent/${id}">Ask MailHealth AI about this list →</a>
+      </div>
+    </div>`;
+}
+
+// Small helpers for the tagged-statement vocabulary.
+function kindTag(kind) {
+  const cls = { FACT: 'safe', INFERENCE: 'brand', PREDICTION: 'review', RECOMMENDATION: 'brand-2' }[kind] || 'muted';
+  return `<span class="pill" style="background:var(--${cls});color:#0b0f17;font-size:10px">${esc(kind)}</span>`;
+}
+function confTag(c) {
+  if (!c) return '';
+  const color = { HIGH: 'var(--safe)', MEDIUM: 'var(--review)', LOW: 'var(--muted)' }[c] || 'var(--muted)';
+  return `<span class="muted" style="font-size:11px;color:${color}"> · ${esc(c)}</span>`;
+}
+function stmtList(items) {
+  if (!items || !items.length) return '';
+  return `<ul style="margin:6px 0 0;padding-left:2px;list-style:none">${
+    items.map((s) => `<li style="margin-bottom:6px">${kindTag(s.kind)}${confTag(s.confidence)}<br>${esc(s.text)}</li>`).join('')
+  }</ul>`;
+}
+function riskColor(level) {
+  return { LOW: 'var(--safe)', MEDIUM: 'var(--review)', HIGH: 'var(--remove)' }[level] || 'var(--muted)';
+}
+
+async function loadAiInsights(id, content) {
+  const card = content.querySelector('#aiInsights');
+  if (!card) return;
+  const status = card.querySelector('#aiInsightsStatus');
+  const body = card.querySelector('#aiInsightsBody');
+
+  // Fetch all cards in parallel; tolerate individual failures.
+  const [risk, health, domains, forecast, anomalies] = await Promise.all([
+    api.aiCampaignRisk(id).catch(() => null),
+    api.aiHealthAnalysis(id).catch(() => null),
+    api.aiDomains(id).catch(() => null),
+    api.aiHealthPrediction(id).catch(() => null),
+    api.aiAnomalies(id).catch(() => null),
+  ]);
+
+  if (!risk && !health) {
+    status.textContent = 'AI insights become available once the list is verified.';
+    return;
+  }
+  status.style.display = 'none';
+  body.style.display = '';
+
+  // Campaign risk
+  const rEl = card.querySelector('#aiRisk');
+  if (risk && risk.available) {
+    rEl.innerHTML = `
+      <div class="stat-label">Campaign risk</div>
+      <div class="stat" style="color:${riskColor(risk.riskLevel)}">${esc(risk.riskLevel)}</div>
+      <div class="muted" style="font-size:12px">score ${risk.riskScore}/100 · recommended send ${risk.recommendedSendCount.toLocaleString()}</div>
+      <p style="margin:8px 0 0;font-size:13px">${esc(risk.summary || '')}</p>`;
+  } else {
+    rEl.innerHTML = `<div class="stat-label">Campaign risk</div><p class="muted">${esc(risk?.message || 'Not available yet.')}</p>`;
+  }
+
+  // Health analysis
+  const hEl = card.querySelector('#aiHealth');
+  if (health && health.available) {
+    const trendIcon = { IMPROVING: '▲', DECLINING: '▼', STABLE: '■' }[health.trend] || '';
+    hEl.innerHTML = `
+      <div class="stat-label">Health analysis</div>
+      <div style="font-size:15px;margin:2px 0"><b>${health.healthScore}/100</b> <span class="muted">${trendIcon} ${esc(health.trend)}</span></div>
+      <p style="margin:4px 0 0;font-size:13px">${esc(health.summary || '')}</p>
+      ${stmtList(health.recommendations)}`;
+  } else {
+    hEl.innerHTML = `<div class="stat-label">Health analysis</div><p class="muted">${esc(health?.summary || 'Not available yet.')}</p>`;
+  }
+
+  // Top problem domains
+  const dEl = card.querySelector('#aiDomains');
+  if (domains && domains.available && domains.domains.length) {
+    const rows = domains.domains.slice(0, 4).map((d, i) =>
+      `<div class="signal" title="${esc(d.recommendedAction)}"><span class="dot" style="background:${riskColor(d.problemScore >= 30 ? 'HIGH' : d.problemScore >= 15 ? 'MEDIUM' : 'LOW')}"></span>${i + 1}. ${esc(d.domain)} <span class="muted">(${d.total})</span></div>`
+    ).join('');
+    dEl.innerHTML = `<div class="stat-label">Top problem domains</div>${rows}`;
+  } else {
+    dEl.innerHTML = `<div class="stat-label">Top problem domains</div><p class="muted">No standout problem domains.</p>`;
+  }
+
+  // Health forecast (prediction)
+  const fEl = card.querySelector('#aiForecast');
+  if (forecast && forecast.available) {
+    const p = forecast.predictionRanges || {};
+    fEl.innerHTML = `
+      <div class="stat-label">Health forecast ${kindTag('PREDICTION')}${confTag(forecast.confidence)}</div>
+      <div class="muted" style="font-size:13px">Current ${forecast.currentScore} · ${esc(forecast.trend)}</div>
+      <div style="font-size:13px;margin-top:4px">30d: <b>${esc(p['30d'] || '—')}</b> · 60d: <b>${esc(p['60d'] || '—')}</b> · 90d: <b>${esc(p['90d'] || '—')}</b></div>
+      ${forecast.warning ? `<p class="error" style="font-size:12px;margin-top:6px">⚠ ${esc(forecast.warning)}</p>` : ''}
+      <p class="muted" style="font-size:11px;margin-top:6px">${esc(forecast.note || '')}</p>`;
+  } else {
+    fEl.innerHTML = `<div class="stat-label">Health forecast</div><p class="muted">${esc(forecast?.message || 'Insufficient historical data for a forecast.')}</p>`;
+  }
+
+  // Anomalies (full-width row)
+  const aEl = card.querySelector('#aiAnomalyRow');
+  if (anomalies && anomalies.available && anomalies.detected) {
+    aEl.innerHTML = anomalies.anomalies.map((an) =>
+      `<div class="banner-warn" style="margin-top:8px"><span><b>Anomaly:</b> ${esc(an.statement?.text || (an.metric + ' changed'))}</span></div>`
+    ).join('');
+  } else {
+    aEl.innerHTML = '';
+  }
 }
 
 function renderHistoryWithChart(history) {
@@ -910,6 +1053,8 @@ function renderSingleResult(r) {
 
     <div class="stat-label">Risk signals</div>
     <div style="margin:4px 0 14px">${riskChips(r.riskSignals)}</div>
+
+    ${calibratedConfidence(r.confidenceCalibration)}
 
     <h3 style="font-size:13px;margin:14px 0 6px">Technical evidence</h3>
     ${(r.signals || []).map(signalRow).join('')}

@@ -17,6 +17,7 @@ export class VerificationQueue {
     verificationEngine,
     webhookSender,
     summarize,
+    calibrator = null,
     concurrency = 5,
   }) {
     this.jobs = jobRepository;
@@ -27,6 +28,9 @@ export class VerificationQueue {
     this.engine = verificationEngine;
     this.webhooks = webhookSender;
     this.summarize = summarize;
+    // OPTIONAL ML confidence calibrator. Additive; never affects the verdict
+    // and never causes a verification to fail.
+    this.calibrator = calibrator;
     this.concurrency = concurrency;
 
     this._running = false;
@@ -84,6 +88,9 @@ export class VerificationQueue {
         const i = index++;
         try {
           const r = await this.engine.verify(emails[i]);
+          if (this.calibrator) {
+            try { r.confidenceCalibration = this.calibrator.calibrate(r); } catch { /* ML never breaks verification */ }
+          }
           this.contacts.saveResult(pending[i].id, r);
         } catch {
           // leave unverified; a resume will retry it

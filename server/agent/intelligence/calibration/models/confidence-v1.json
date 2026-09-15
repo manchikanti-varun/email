@@ -1,0 +1,8 @@
+{
+  "version": "confidence-v1",
+  "kind": "logistic-regression",
+  "trained": false,
+  "reason": "insufficient-data",
+  "samples": 0,
+  "note": "No validated benchmark dataset has been trained yet. The system reports 'ML Confidence Calibration: UNAVAILABLE' and uses the deterministic engine's confidence. Train a real model with: node scripts/train-calibration.mjs <dataset.json> --deploy. Never commit a model trained on fabricated data."
+}

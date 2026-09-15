@@ -10,6 +10,7 @@ export class SqliteContactRepository extends ContactRepository {
       `UPDATE contacts SET score=?, classification=?, status=?, signals=?, reasons=?,
          recommendation=?, greylisted=?, provider=?, retry_after=?,
          deliverability=?, confidence=?, recommended_action=?, risk_signals=?,
+         calibrated_confidence=?, calibration_level=?, calibration_model=?,
          verified_at=? WHERE id=?`
     );
   }
@@ -61,12 +62,20 @@ export class SqliteContactRepository extends ContactRepository {
       ? new Date(Date.now() + 30 * 60 * 1000).toISOString()
       : null;
     const tx = this.db.transaction(() => {
+      // ML calibration is OPTIONAL and additive. When a calibration block is
+      // present on the result we persist its reliability estimate; otherwise we
+      // write NULLs. The deterministic verdict columns are unaffected.
+      const cal = r.confidenceCalibration || null;
+      const calScore = cal && Number.isFinite(cal.score) ? cal.score : null;
+      const calLevel = cal && cal.level ? cal.level : null;
+      const calModel = cal && cal.model ? cal.model : null;
       this._update.run(
         r.score, r.classification, r.status,
         JSON.stringify(r.signals), JSON.stringify(r.reasons),
         r.recommendation, r.greylisted ? 1 : 0, r.provider, retryAfter,
         r.deliverability, r.confidence, r.recommendedAction,
         JSON.stringify(r.riskSignals || []),
+        calScore, calLevel, calModel,
         r.verified_at, contactId
       );
     });

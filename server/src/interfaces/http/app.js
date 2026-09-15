@@ -18,9 +18,10 @@ import { makeListRouter } from './routes/list-routes.js';
 import { makeCampaignRouter } from './routes/campaign-routes.js';
 import { makeIntegrationRouter } from './routes/integration-routes.js';
 import { makeAgentRouter } from './routes/agent-routes.js';
+import { makeAiRouter } from './routes/ai-routes.js';
 
 export function buildApp(container) {
-  const { config, db, verifyCapability, useCases, authRequired, cookies } = container;
+  const { config, db, verifyCapability, calibrator, useCases, authRequired, cookies } = container;
   const publicDir = path.join(config.ROOT, 'public');
 
   const app = express();
@@ -97,6 +98,7 @@ export function buildApp(container) {
   app.use('/api/campaigns', makeCampaignRouter({ ...useCases, authRequired }));
   app.use('/api/integrations', makeIntegrationRouter({ ...useCases, authRequired }));
   app.use('/api/agent', makeAgentRouter({ ...useCases, authRequired }));
+  app.use('/api/ai', makeAiRouter({ ...useCases, authRequired, calibrator }));
 
   // ---- Static frontend ----
   app.use(express.static(publicDir, {
