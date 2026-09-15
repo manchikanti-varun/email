@@ -15,12 +15,13 @@ import {
   SignalRow,
   CalibratedConfidencePanel,
   CalibratedBadge,
+  ConfidencePanel,
   LineChart,
   KindTag,
   ConfTag,
   StmtList,
 } from '../components/ui';
-import { scoreColor, riskColor } from '../lib/format';
+import { scoreColor, riskColor, deterministicConfidence } from '../lib/format';
 import type {
   ListDetail,
   Contact,
@@ -76,17 +77,22 @@ function hasRealMl(c: Contact): boolean {
   return !!(c.calibrationLevel && c.calibrationModel && c.calibrationModel !== 'deterministic-fallback');
 }
 
-// AI-confidence table cell. Only shows a real ML badge when a trained model
-// exists; otherwise it's honest that the value is the deterministic engine's
-// own confidence, not an ML estimate.
+// AI-confidence table cell. When a trained ML model exists it shows the
+// calibrated ML value; otherwise it shows the engine's OWN confidence as a
+// percentage, honestly tagged "rule-based" (not ML). Never invents a number
+// beyond the deterministic confidence the engine already produced.
 function AiConfidenceCell({ contact }: { contact: Contact }) {
   if (hasRealMl(contact)) return <CalibratedBadge cal={calFromContact(contact)} />;
+  const det = deterministicConfidence(contact.confidence);
+  if (!det) return <span className="muted">—</span>;
   return (
     <span
-      className="muted"
-      title="No trained ML model is deployed, so there is no independent AI estimate. The deterministic verdict and its confidence stand on their own."
+      className="pill"
+      style={{ color: 'var(--text-2)' }}
+      title="The engine's own confidence in this verdict (rule-based). No ML model is deployed, so this is not an independent ML estimate."
     >
-      —
+      {det.level} {det.pct}%{' '}
+      <span style={{ fontSize: 9, opacity: 0.7 }}>rule-based</span>
     </span>
   );
 }
@@ -144,26 +150,7 @@ function ContactModal({ contact, listId, onClose }: { contact: Contact; listId: 
           </div>
           <ActionBadge action={contact.recommendedAction || contact.classification} />
         </div>
-        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
-          <div className="stat-label">
-            AI confidence{' '}
-            <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>
-              {cal && cal.available ? 'ML' : 'N/A'}
-            </span>
-          </div>
-          <div style={{ margin: '6px 0 4px' }}>
-            {cal && cal.available && cal.level ? (
-              <CalibratedBadge cal={cal} />
-            ) : (
-              <span className="muted" style={{ fontSize: 12 }}>No ML model deployed</span>
-            )}
-          </div>
-          <div className="muted" style={{ fontSize: 11 }}>
-            {cal && cal.available
-              ? 'ML estimate of how reliable the verdict is. Never overrides it.'
-              : 'No trained ML model yet, so there is no independent AI estimate — the deterministic verdict stands on its own.'}
-          </div>
-        </div>
+        <ConfidencePanel cal={cal} confidence={contact.confidence} />
       </div>
 
       <div className="stat-label">Risk signals</div>
@@ -233,8 +220,8 @@ function ContactsTable({ contacts, listId }: { contacts: Contact[]; listId: stri
                   Verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
                 </th>
                 <th title="Evidence strength behind the deterministic verdict.">Confidence</th>
-                <th title="ML-calibrated estimate of how reliable the verdict is. Additive — it never changes the verdict.">
-                  AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+                <th title="How reliable the verdict is. Uses a trained ML model when one is deployed; otherwise the engine's own rule-based confidence. Never changes the verdict.">
+                  Confidence&nbsp;%
                 </th>
                 <th>Risk signals</th>
                 <th title="Recommended action derived from the deterministic verdict.">Action</th>

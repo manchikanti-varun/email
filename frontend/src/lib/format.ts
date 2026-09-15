@@ -49,3 +49,18 @@ export const CAL_LEVEL_COLOR: Record<string, string> = {
   MEDIUM: 'var(--review)',
   LOW: 'var(--catchall)',
 };
+
+// Deterministic confidence -> (LEVEL, percent). Mirrors the backend calibrator's
+// DET_CONF fallback (server/agent/intelligence/calibration/calibrator.js) so the
+// UI can show the engine's own confidence as a number when no ML model exists.
+export const DET_CONF_MAP: Record<string, { level: 'HIGH' | 'MEDIUM' | 'LOW'; pct: number }> = {
+  high: { level: 'HIGH', pct: 92 },
+  medium: { level: 'MEDIUM', pct: 75 },
+  low: { level: 'LOW', pct: 50 },
+  unknown: { level: 'LOW', pct: 40 },
+};
+
+export function deterministicConfidence(confidence?: string): { level: 'HIGH' | 'MEDIUM' | 'LOW'; pct: number } | null {
+  if (!confidence) return null;
+  return DET_CONF_MAP[confidence.toLowerCase()] || null;
+}

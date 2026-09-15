@@ -9,7 +9,7 @@ import {
   RiskChips,
   SignalRow,
   CalibratedConfidencePanel,
-  CalibratedBadge,
+  ConfidencePanel,
 } from '../components/ui';
 import type { VerifyResult } from '../types';
 
@@ -41,26 +41,7 @@ function SingleResult({ r }: { r: VerifyResult }) {
           </div>
           <ActionBadge action={r.recommendedAction || r.classification} />
         </div>
-        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
-          <div className="stat-label">
-            AI confidence{' '}
-            <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>
-              {r.confidenceCalibration && r.confidenceCalibration.available ? 'ML' : 'N/A'}
-            </span>
-          </div>
-          <div style={{ margin: '6px 0 4px' }}>
-            {r.confidenceCalibration && r.confidenceCalibration.available && r.confidenceCalibration.level ? (
-              <CalibratedBadge cal={r.confidenceCalibration} />
-            ) : (
-              <span className="muted" style={{ fontSize: 12 }}>No ML model deployed</span>
-            )}
-          </div>
-          <div className="muted" style={{ fontSize: 11 }}>
-            {r.confidenceCalibration && r.confidenceCalibration.available
-              ? 'ML estimate of how reliable the verdict is. Never overrides it.'
-              : 'No trained ML model yet, so there is no independent AI estimate — the deterministic verdict stands on its own.'}
-          </div>
-        </div>
+        <ConfidencePanel cal={r.confidenceCalibration} confidence={r.confidence} />
       </div>
 
       <div className="stat-label">Risk signals</div>
