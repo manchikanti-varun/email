@@ -69,6 +69,23 @@ export class Planner {
 
     const id = listId || (result('get_lists')?.lists?.[0]?.id) || context.lists?.[0]?.id;
 
+    // Intent: a question about ONE specific contact. If the message contains an
+    // email address, answer about that address (why it scored what it did / how
+    // reliable the verdict is) instead of falling through to a whole-list
+    // summary. Uses the deterministic per-contact explanation + calibration.
+    const emailInMsg = extractEmail(userMessage);
+    if (emailInMsg && id) {
+      if (!has('generate_email_explanation')) {
+        return tool('generate_email_explanation', { listId: id, email: emailInMsg }, `Explaining ${emailInMsg}.`);
+      }
+      const explanation = result('generate_email_explanation');
+      // Optionally enrich with the calibrated reliability of that verdict.
+      if (!has('calibrate_confidence')) {
+        return tool('calibrate_confidence', { listId: id, email: emailInMsg }, 'Checking how reliable that verdict is.');
+      }
+      return final(this._emailExplanationAnswer(explanation, result('calibrate_confidence'), emailInMsg));
+    }
+
     // Intent: investigate WHY results changed / why so many unknown. Runs the
     // composite investigation (anomaly + incident + domain) for a root cause.
     if ((/\b(why|investigate|reason|cause|explain)\b/.test(msg) && /\b(unknown|verification|results?|change|changed|increase|increased|spike|jump)\b/.test(msg))
@@ -202,6 +219,31 @@ export class Planner {
       `\n\nRecommendation: ${d < 0 ? 'the drop is driven by the bucket changes above; review the newly-flagged contacts before your next send.' : 'health improved; no action needed.'}`;
   }
 
+  // Answer a specific-contact question: the deterministic verdict for that
+  // address, why, and (additively) how reliable that verdict is.
+  _emailExplanationAnswer(exp, cal, email) {
+    if (!exp || exp.available === false) {
+      return `I couldn't find ${email} in this list. Check the address, or make sure it belongs to the list I'm looking at.`;
+    }
+    const lines = [
+      `Verified facts for ${exp.email}: deliverability "${exp.deliverability}", confidence ${exp.confidence}, recommended action ${String(exp.recommendedAction || '').toUpperCase()}.`,
+    ];
+    // Why — prefer the engine's own reasons; fall back to the plain-language line.
+    if (Array.isArray(exp.engineReasons) && exp.engineReasons.length) {
+      lines.push('Why: ' + exp.engineReasons.join(' '));
+    } else if (exp.simple) {
+      lines.push('Why: ' + exp.simple);
+    }
+    // Additive ML reliability of the verdict (never overrides it).
+    if (cal && cal.confidence && cal.confidence.level) {
+      const c = cal.confidence;
+      const pct = Number.isFinite(c.score) ? ` (${Math.round(c.score * 100)}%)` : '';
+      lines.push(`AI confidence in this verdict: ${c.level}${pct}${c.available === false ? ' (deterministic — no ML model)' : ''}.`);
+    }
+    lines.push('Recommendation: ' + (exp.simple || 'Review this contact before sending.'));
+    return lines.join('\n\n');
+  }
+
   _analysisAnswer(a) {
     if (!a) return 'I could not load that list.';
     const s = a.summary || {};
@@ -271,3 +313,11 @@ export class Planner {
 
 function tool(name, args, thought) { return { action: 'tool', tool: name, args, thought: thought || '', message: '' }; }
 function final(message, extra = {}) { return { action: 'final', tool: null, args: {}, thought: '', message, ...extra }; }
+
+// Extract the first email address mentioned in a free-text message, if any.
+// Used so specific-contact questions route to the per-contact tools instead of
+// the whole-list default.
+function extractEmail(text) {
+  const m = String(text || '').match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return m ? m[0].toLowerCase() : null;
+}
