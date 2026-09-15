@@ -43,6 +43,26 @@ const ROLE_SEED = [
   'recruitment', 'partners', 'partnerships', 'finance', 'operations',
 ];
 
+// Curated subset of role words that are safe to match as a SUBSTRING inside a
+// concatenated local-part (e.g. "mumbaisales", "indiasupport"). Kept to common,
+// unambiguous, >= 4-char words so we don't over-flag. Short/ambiguous tokens
+// (hr, dns, ftp, www, team, list, mail, test, root, noc) are deliberately
+// EXCLUDED from substring matching — they still match exactly or as tokens.
+const SUBSTRING_ROLE_WORDS = [
+  'admin', 'billing', 'careers', 'compliance', 'contact', 'enquiries',
+  'feedback', 'finance', 'helpdesk', 'info', 'inquiries', 'marketing',
+  'newsletter', 'noreply', 'orders', 'partnerships', 'sales', 'security',
+  'support', 'webmaster',
+];
+
+// Words that CONTAIN a role substring but are NOT role mailboxes. Guards the
+// tier-3 substring check against obvious false positives.
+const ROLE_FALSE_POSITIVES = new Set([
+  'wholesale', 'wholesales', 'resale', 'resales', 'presale', 'presales',
+  'salesforce', 'salesperson', 'salesman', 'saleswoman',
+  'infographic', 'securities',
+]);
+
 const FREE_SEED = [
   'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in',
   'ymail.com', 'rocketmail.com', 'outlook.com', 'outlook.co.uk',
@@ -87,7 +107,34 @@ export class ReferenceData {
   }
 
   isDisposable(domain) { return this.disposable.has(domain); }
-  isRole(local) { return this.roles.has(local); }
+
+  // Role detection is intentionally fuzzy but guarded. A mailbox is treated as
+  // role-based / shared when its local-part is, or clearly contains, a known
+  // functional name. Three tiers, cheapest first:
+  //   1. exact          "sales"                       -> role
+  //   2. token match    "sales.india", "india-sales"  -> role  (split on . - _ + / digits)
+  //   3. substring      "mumbaisales", "indiasupport" -> role  (guarded)
+  // Substring matching only uses role words >= 4 chars and skips well-known
+  // false positives (e.g. "wholesale"/"salesforce" contain "sales" but are not
+  // role mailboxes). Being role-based is a characteristic, never a health
+  // penalty, so a rare miss is preferable to over-flagging real people.
+  isRole(local) {
+    const s = String(local || '').toLowerCase();
+    if (!s) return false;
+    if (this.roles.has(s)) return true; // tier 1: exact
+
+    // tier 2: any separated token is a known role.
+    const tokens = s.split(/[.\-_+/\d]+/).filter(Boolean);
+    if (tokens.length > 1 && tokens.some((t) => this.roles.has(t))) return true;
+
+    // tier 3: guarded substring for unambiguous role words.
+    if (ROLE_FALSE_POSITIVES.has(s)) return false;
+    for (const roleWord of SUBSTRING_ROLE_WORDS) {
+      if (s.includes(roleWord)) return true;
+    }
+    return false;
+  }
+
   isFreeProvider(domain) { return this.free.has(domain); }
   typoSuggestion(domain) { return this.typos[domain] || null; }
   isReservedDomain(domain) {
