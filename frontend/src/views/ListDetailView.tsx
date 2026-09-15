@@ -105,21 +105,38 @@ function ContactModal({ contact, listId, onClose }: { contact: Contact; listId: 
         <ActionBadge action={contact.recommendedAction || contact.classification} />
       </div>
 
-      <div className="grid cols-3" style={{ margin: '14px 0' }}>
-        <div>
-          <div className="stat-label">Deliverability</div>
-          <DeliverabilityLabel value={contact.deliverability || contact.status} />
-          <div className="muted" style={{ fontSize: 11 }}>
-            score {contact.deliverabilityScore ?? contact.score ?? '—'}/100
+      {/* Side-by-side: the deterministic verdict (the actual result) vs. the
+          ML-calibrated confidence (an additive reliability estimate). */}
+      <div className="grid cols-2" style={{ margin: '14px 0', gap: 12 }}>
+        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
+          <div className="stat-label">
+            Deterministic verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
           </div>
-        </div>
-        <div>
-          <div className="stat-label">Confidence</div>
-          <ConfidenceLabel value={contact.confidence} />
-        </div>
-        <div>
-          <div className="stat-label">Action</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '6px 0 2px' }}>
+            <DeliverabilityLabel value={contact.deliverability || contact.status} />
+            <span className="muted" style={{ fontSize: 11 }}>
+              score {contact.deliverabilityScore ?? contact.score ?? '—'}/100
+            </span>
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 4 }}>
+            Evidence confidence: <ConfidenceLabel value={contact.confidence} />
+          </div>
           <ActionBadge action={contact.recommendedAction || contact.classification} />
+        </div>
+        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
+          <div className="stat-label">
+            AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+          </div>
+          <div style={{ margin: '6px 0 4px' }}>
+            {cal && cal.level ? (
+              <CalibratedBadge cal={cal} />
+            ) : (
+              <span className="muted" style={{ fontSize: 12 }}>Not available</span>
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 11 }}>
+            How reliable the verdict is. This never overrides the deterministic result.
+          </div>
         </div>
       </div>
 
@@ -186,10 +203,15 @@ function ContactsTable({ contacts, listId }: { contacts: Contact[]; listId: stri
             <thead>
               <tr>
                 <th>Email</th>
-                <th>Deliverability</th>
-                <th>Confidence</th>
+                <th title="Deterministic verification engine — the actual verdict, never guessed.">
+                  Verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
+                </th>
+                <th title="Evidence strength behind the deterministic verdict.">Confidence</th>
+                <th title="ML-calibrated estimate of how reliable the verdict is. Additive — it never changes the verdict.">
+                  AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+                </th>
                 <th>Risk signals</th>
-                <th>Action</th>
+                <th title="Recommended action derived from the deterministic verdict.">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -201,8 +223,14 @@ function ContactsTable({ contacts, listId }: { contacts: Contact[]; listId: stri
                     <span className="muted" style={{ fontSize: 11 }}> · {c.deliverabilityScore ?? c.score ?? '—'}</span>
                   </td>
                   <td>
-                    <ConfidenceLabel value={c.confidence} />{' '}
-                    {c.calibrationLevel && <CalibratedBadge cal={calFromContact(c)} />}
+                    <ConfidenceLabel value={c.confidence} />
+                  </td>
+                  <td>
+                    {c.calibrationLevel ? (
+                      <CalibratedBadge cal={calFromContact(c)} />
+                    ) : (
+                      <span className="muted" title="No ML calibration available for this contact — the deterministic verdict stands on its own.">—</span>
+                    )}
                   </td>
                   <td>
                     <RiskSummary riskSignals={c.riskSignals} />

@@ -9,6 +9,7 @@ import {
   RiskChips,
   SignalRow,
   CalibratedConfidencePanel,
+  CalibratedBadge,
 } from '../components/ui';
 import type { VerifyResult } from '../types';
 
@@ -25,18 +26,35 @@ function SingleResult({ r }: { r: VerifyResult }) {
         </div>
       </div>
 
-      <div className="grid cols-3" style={{ margin: '8px 0 16px' }}>
-        <div>
-          <div className="stat-label">Deliverability</div>
-          <DeliverabilityLabel value={r.deliverability || r.status} />
-        </div>
-        <div>
-          <div className="stat-label">Confidence</div>
-          <ConfidenceLabel value={r.confidence} />
-        </div>
-        <div>
-          <div className="stat-label">Recommended action</div>
+      {/* Side-by-side: deterministic verdict (rules) and the ML calibrated
+          confidence (additive reliability estimate). */}
+      <div className="grid cols-2" style={{ margin: '8px 0 16px', gap: 12 }}>
+        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
+          <div className="stat-label">
+            Deterministic verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
+          </div>
+          <div style={{ margin: '6px 0 4px' }}>
+            <DeliverabilityLabel value={r.deliverability || r.status} />
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 6 }}>
+            Evidence confidence: <ConfidenceLabel value={r.confidence} />
+          </div>
           <ActionBadge action={r.recommendedAction || r.classification} />
+        </div>
+        <div className="card" style={{ background: 'var(--bg-2)', padding: 14 }}>
+          <div className="stat-label">
+            AI confidence <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>ML</span>
+          </div>
+          <div style={{ margin: '6px 0 4px' }}>
+            {r.confidenceCalibration && r.confidenceCalibration.level ? (
+              <CalibratedBadge cal={r.confidenceCalibration} />
+            ) : (
+              <span className="muted" style={{ fontSize: 12 }}>Not available</span>
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 11 }}>
+            How reliable the verdict is. This never overrides the deterministic result.
+          </div>
         </div>
       </div>
 
