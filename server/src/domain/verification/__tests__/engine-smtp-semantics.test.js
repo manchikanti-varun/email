@@ -80,10 +80,11 @@ test('worker reports 550 (rejected) -> UNDELIVERABLE, remove', async () => {
   assert.equal(r.recommendedAction, ACTION.REMOVE);
 });
 
-test('catch-all -> RISKY + review, NOT removed', async () => {
+test('catch-all -> RISKY + review, NOT removed (mailboxStatus ACCEPT_ALL)', async () => {
   const smtp = { check: async () => ({ reachable: true, catchAll: true, source: 'smtp-worker' }) };
   const r = await engineWith({ smtp }).verify('anyone@example.com');
   assert.equal(r.deliverability, DELIVERABILITY.RISKY);
+  assert.equal(r.mailboxStatus, 'ACCEPT_ALL');
   assert.equal(r.recommendedAction, ACTION.REVIEW);
 });
 

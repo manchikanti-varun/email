@@ -13,9 +13,23 @@ export function toDomainContact(row) {
     calibratedConfidence: row.calibrated_confidence ?? null,
     calibrationLevel: row.calibration_level ?? null,
     calibrationModel: row.calibration_model ?? null,
+    // Additive proven-mailbox dimensions (legacy deliverability unchanged).
+    mailboxStatus: row.mailbox_status ?? null,
+    verificationQuality: row.verification_quality ?? null,
+    smtpEvidence: safeParseObject(row.smtp_evidence),
   };
 }
 
 function safeParse(v) {
   try { return JSON.parse(v || '[]'); } catch { return []; }
+}
+
+function safeParseObject(v) {
+  if (v == null || v === '') return null;
+  try {
+    const parsed = typeof v === 'string' ? JSON.parse(v) : v;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 }

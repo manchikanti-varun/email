@@ -106,12 +106,27 @@ export function smtpConversation(host, { from, ehlo, recipients, timeoutMs, port
   });
 }
 
+const RATE_LIMIT_RE = /rate\s*limit|too many|try again later|slow down|throttl/i;
+const BLOCKED_RE = /blocked|blacklist|blacklisted|banned|not allowed|access denied|spamhaus|rbl|client host rejected|suspicious/i;
+
 // Classify a single RCPT code into a normalized SMTP status.
-export function classifyCode(code) {
+// When response text is available, distinguish rate_limited / blocked from a
+// plain temporary or recipient rejection.
+export function classifyCode(code, responseText = '') {
   if (typeof code !== 'number') return 'no_response';
+  const text = String(responseText || '');
   if (code >= 200 && code < 300) return 'accepted';
-  if (code >= 400 && code < 500) return 'temporary';
-  if (code >= 500 && code < 600) return 'rejected';
+  if (code >= 400 && code < 500) {
+    if (RATE_LIMIT_RE.test(text)) return 'rate_limited';
+    return 'temporary';
+  }
+  if (code >= 500 && code < 600) {
+    if (BLOCKED_RE.test(text) && !/user|mailbox|recipient|no such|doesn't exist|unknown|invalid/i.test(text)) {
+      return 'blocked';
+    }
+    if (RATE_LIMIT_RE.test(text)) return 'rate_limited';
+    return 'rejected';
+  }
   return 'unknown';
 }
 
@@ -119,4 +134,14 @@ export function classifyCode(code) {
 // mailbox. The router/engine must treat these as "unknown", not "invalid".
 export function isTransportFailure(error) {
   return !!error; // any transport error code means we could not converse
+}
+
+/** Normalize a socket/transport error into a stable class. */
+export function classifyTransportError(error) {
+  if (!error) return null;
+  const e = String(error).toUpperCase();
+  if (e === 'TIMEOUT' || e.includes('ETIMEDOUT') || e.includes('TIMEOUT')) return 'timeout';
+  if (e.includes('ECONNREFUSED') || e.includes('REFUSED')) return 'connection_refused';
+  if (e.includes('EPROTO') || e.includes('CERT') || e.includes('SSL') || e.includes('TLS')) return 'tls_failure';
+  return 'unknown';
 }

@@ -144,6 +144,10 @@ ensureColumn('contacts', 'risk_signals', 'risk_signals TEXT');
 ensureColumn('contacts', 'calibrated_confidence', 'calibrated_confidence REAL');
 ensureColumn('contacts', 'calibration_level', 'calibration_level TEXT');
 ensureColumn('contacts', 'calibration_model', 'calibration_model TEXT');
+// Additive mailbox proof + evidence quality (never alter legacy deliverability).
+ensureColumn('contacts', 'mailbox_status', 'mailbox_status TEXT');
+ensureColumn('contacts', 'verification_quality', 'verification_quality TEXT');
+ensureColumn('contacts', 'smtp_evidence', 'smtp_evidence TEXT');
 ensureColumn('users', 'api_key_hash', 'api_key_hash TEXT');
 ensureColumn('users', 'api_key_prefix', 'api_key_prefix TEXT');
 

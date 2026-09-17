@@ -11,6 +11,7 @@ export class SqliteContactRepository extends ContactRepository {
          recommendation=?, greylisted=?, provider=?, retry_after=?,
          deliverability=?, confidence=?, recommended_action=?, risk_signals=?,
          calibrated_confidence=?, calibration_level=?, calibration_model=?,
+         mailbox_status=?, verification_quality=?, smtp_evidence=?,
          verified_at=? WHERE id=?`
     );
   }
@@ -74,6 +75,9 @@ export class SqliteContactRepository extends ContactRepository {
       r.deliverability, r.confidence, r.recommendedAction,
       JSON.stringify(r.riskSignals || []),
       calScore, calLevel, calModel,
+      r.mailboxStatus || null,
+      r.verificationQuality || null,
+      r.smtpEvidence ? JSON.stringify(r.smtpEvidence) : null,
       r.verified_at, contactId
     );
   }

@@ -25,11 +25,12 @@ test('maps rejected -> mailboxRejected', async () => {
   assert.equal(r.mailboxRejected, true);
 });
 
-test('maps catch-all -> catchAll + risky handling upstream', async () => {
+test('maps catch-all -> catchAll + not mailboxExists', async () => {
   const p = new RemoteSmtpProbe({ ...base, fetchImpl: fakeFetch({ smtp: { status: 'catch-all', code: 250 }, catchAll: true }) });
   const r = await p.check('a@x.com', ['mx']);
   assert.equal(r.catchAll, true);
-  assert.notEqual(r.mailboxExists, true);
+  assert.equal(r.mailboxExists, false);
+  assert.equal(r.smtpClass, 'catch-all');
 });
 
 test('maps temporary -> temporaryFailure + greylisted', async () => {

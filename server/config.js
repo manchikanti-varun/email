@@ -68,6 +68,13 @@ export const config = {
     enabled: bool(process.env.SMTP_ENABLED, true),
     from: process.env.SMTP_FROM || 'verify@example.com',
     timeoutMs: parseInt(process.env.SMTP_TIMEOUT_MS || '6000', 10),
+    // Bounded transport retries (connection refused/reset). Timeouts are not
+    // retried in-request — they fall through to the next MX / vantage instead.
+    maxRetries: parseInt(process.env.SMTP_MAX_RETRIES || '1', 10),
+    // Per-domain minimum interval between SMTP probes (rate limit).
+    domainMinIntervalMs: parseInt(process.env.SMTP_DOMAIN_MIN_INTERVAL_MS || '80', 10),
+    // Short-TTL cache for conclusive SMTP answers (accepted/rejected/catch-all).
+    cacheTtlMs: parseInt(process.env.SMTP_CACHE_TTL_MS || String(10 * 60 * 1000), 10),
     // SMTP routing mode: 'auto' (default) tries local port 25 and falls back to
     // the MailHealth SMTP worker; 'local' uses only the local socket probe;
     // 'remote' always uses the worker; 'disabled' performs no SMTP probing.

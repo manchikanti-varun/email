@@ -65,6 +65,15 @@ test('non-catch-all: real accepted, random rejected -> not catchAll', async () =
   assert.equal(isCatchAll({ targetStatus, probeStatus }), false);
 });
 
+test('not catch-all when only random accepts (real rejected)', () => {
+  assert.equal(isCatchAll({ targetStatus: 'rejected', probeStatus: 'accepted' }), false);
+});
+
+test('classifyCode distinguishes rate_limited via response text', () => {
+  assert.equal(classifyCode(421, '4.7.0 Rate limited — try again later'), 'rate_limited');
+  assert.equal(classifyCode(550, '5.1.1 User unknown'), 'rejected');
+});
+
 test('catch-all domain cache: hit returns stored flag; clear resets', () => {
   clearCatchAllCache();
   assert.equal(getCachedCatchAll('example.com'), null);

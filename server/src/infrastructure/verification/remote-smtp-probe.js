@@ -8,6 +8,11 @@
 // turns a transport/worker failure into a negative mailbox verdict — a failure
 // is reported as inconclusive (-> engine yields "unknown").
 import { SmtpProbe } from '../../domain/ports/index.js';
+import {
+  classifySmtpCode,
+  classifyTransportError,
+  SMTP_CLASS,
+} from '../../domain/verification/smtp-classify.js';
 
 export class RemoteSmtpProbe extends SmtpProbe {
   /**
@@ -28,7 +33,16 @@ export class RemoteSmtpProbe extends SmtpProbe {
   get configured() { return !!(this.cfg.url && this.cfg.secret); }
 
   async check(email, mxHosts) {
-    if (!this.configured) return { reachable: false, error: 'worker-not-configured', inconclusive: true, source: 'none' };
+    if (!this.configured) {
+      return {
+        reachable: false,
+        error: 'worker-not-configured',
+        inconclusive: true,
+        source: 'none',
+        smtpClass: SMTP_CLASS.UNKNOWN,
+        vantage: 'vps-worker',
+      };
+    }
     const hosts = Array.isArray(mxHosts) ? mxHosts.filter(Boolean) : [];
     const mxHost = hosts[0] || undefined;
     const mxHostList = hosts.length ? hosts : undefined;
@@ -38,11 +52,37 @@ export class RemoteSmtpProbe extends SmtpProbe {
       data = await this._call({ email, mxHost, mxHosts: mxHostList });
     } catch (e) {
       // Worker unreachable / timeout / error => inconclusive, never invalid.
-      return { reachable: false, error: e.message || 'worker-error', inconclusive: true, source: 'none' };
+      const err = e.message || 'worker-error';
+      return {
+        reachable: false,
+        error: err,
+        inconclusive: true,
+        source: 'none',
+        smtpClass: err === 'worker-timeout' ? SMTP_CLASS.TIMEOUT : SMTP_CLASS.UNKNOWN,
+        vantage: 'vps-worker',
+        mxAttempts: hosts.map((h) => ({ mxHost: h, outcome: 'worker_error', error: err })),
+      };
     }
 
     const smtp = data.smtp || {};
     const status = smtp.status; // accepted|rejected|temporary|catch-all|unknown
+    const code = smtp.code ?? null;
+    const response = smtp.response || null;
+    const smtpClass = status === 'catch-all'
+      ? 'catch-all'
+      : (status === 'unknown' || smtp.error
+        ? (classifyTransportError(smtp.error) || classifySmtpCode(code, response) || SMTP_CLASS.UNKNOWN)
+        : (classifySmtpCode(code, response) || status || SMTP_CLASS.UNKNOWN));
+
+    const mxAttempts = Array.isArray(smtp.mxAttempts) && smtp.mxAttempts.length
+      ? smtp.mxAttempts
+      : (smtp.triedHosts || hosts).map((h) => ({
+        mxHost: h,
+        outcome: smtp.mxHost === h ? (status || 'tried') : 'tried',
+        error: smtp.mxHost === h ? (smtp.error || null) : null,
+        code: smtp.mxHost === h ? code : null,
+        response: smtp.mxHost === h ? response : null,
+      }));
 
     // Transport-level failure reported by the worker.
     if (status === 'unknown' || smtp.error) {
@@ -51,24 +91,38 @@ export class RemoteSmtpProbe extends SmtpProbe {
         error: smtp.error || 'inconclusive',
         inconclusive: true,
         source: 'smtp-worker',
+        smtpClass,
         mxUnreachable: true,
         triedHosts: smtp.triedHosts || hosts,
+        mxAttempts,
+        attempts: smtp.attempts || 0,
+        responseTimeMs: smtp.responseTimeMs,
+        workerId: data.worker?.id,
+        vantage: 'vps-worker',
       };
     }
 
+    const catchAll = status === 'catch-all' || data.catchAll === true;
+
     return {
       reachable: true,
-      mailboxExists: status === 'accepted',
+      // Catch-all must not be reported as mailboxExists (would become DELIVERABLE).
+      mailboxExists: status === 'accepted' && !catchAll,
       mailboxRejected: status === 'rejected',
       temporaryFailure: status === 'temporary',
-      catchAll: status === 'catch-all' || data.catchAll === true,
-      code: smtp.code ?? null,
+      catchAll,
+      code,
+      response,
       greylisted: status === 'temporary',
+      smtpClass: catchAll ? 'catch-all' : smtpClass,
       source: 'smtp-worker',
       responseTimeMs: smtp.responseTimeMs,
       mxHost: smtp.mxHost,
       triedHosts: smtp.triedHosts,
+      mxAttempts,
+      attempts: smtp.attempts || 0,
       workerId: data.worker?.id,
+      vantage: 'vps-worker',
     };
   }
 

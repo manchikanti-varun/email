@@ -73,11 +73,30 @@ test('MX fallback: connected primary greylist does NOT hop to secondary', async 
 
 test('MX fallback: all hosts unreachable -> inconclusive + mxUnreachable', async () => {
   const p = probe(async () => ({ connected: false, rcpt: {}, error: 'ETIMEDOUT' }));
-  const hosts = ['a.example.com', 'b.example.com', 'c.example.com', 'd.example.com'];
+  const hosts = [
+    'a.example.com', 'b.example.com', 'c.example.com',
+    'd.example.com', 'e.example.com', 'f.example.com',
+  ];
   const r = await p.check('user@example.com', hosts);
   assert.equal(r.reachable, false);
   assert.equal(r.inconclusive, true);
   assert.equal(r.mxUnreachable, true);
   assert.equal(r.triedHosts.length, MAX_MX_ATTEMPTS);
   assert.deepEqual(r.triedHosts, hosts.slice(0, MAX_MX_ATTEMPTS));
+  assert.equal(r.smtpClass, 'timeout');
+});
+
+test('catch-all: both 250 → catchAll and NOT mailboxExists', async () => {
+  const p = probe(async (_host, _from, recipients) => {
+    const out = { connected: true, greeting: 220, rcpt: {}, rcptText: {}, error: null };
+    for (const r of recipients) {
+      out.rcpt[r] = 250;
+      out.rcptText[r] = 'OK';
+    }
+    return out;
+  });
+  const r = await p.check('anyone@example.com', ['mx.example.com']);
+  assert.equal(r.catchAll, true);
+  assert.equal(r.mailboxExists, false);
+  assert.equal(r.reachable, true);
 });

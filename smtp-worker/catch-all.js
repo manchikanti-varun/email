@@ -22,9 +22,11 @@ export function catchAllAddress(email) {
 }
 
 // Given the target's status and the random probe's status, decide catch-all.
-// Only conclude catch-all when the random address is positively accepted.
+// Only conclude ACCEPT_ALL when BOTH the real mailbox and a random nonexistent
+// address are positively accepted (250). A lone random accept without a real
+// accept is inconclusive, not catch-all proof.
 export function isCatchAll({ targetStatus, probeStatus }) {
-  return probeStatus === 'accepted';
+  return targetStatus === 'accepted' && probeStatus === 'accepted';
 }
 
 /** @returns {boolean|null} cached catch-all flag, or null if unknown/expired */

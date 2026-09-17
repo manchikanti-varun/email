@@ -14,6 +14,8 @@ export type Classification = 'safe' | 'review' | 'remove' | 'unknown';
 export type RecommendedAction = 'keep' | 'review' | 'reverify' | 'remove';
 export type Deliverability = 'deliverable' | 'risky' | 'unknown' | 'undeliverable';
 export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
+export type MailboxStatus = 'DELIVERABLE' | 'UNDELIVERABLE' | 'ACCEPT_ALL' | 'UNKNOWN';
+export type VerificationQuality = 'HIGH' | 'MEDIUM' | 'LOW';
 export type SignalStatus = 'pass' | 'warn' | 'fail' | 'info';
 
 export interface Signal {
@@ -42,6 +44,15 @@ export interface CalibratedConfidence {
   disagreement?: { warning?: string };
 }
 
+export interface SmtpEvidence {
+  vantages?: Array<Record<string, unknown>>;
+  mxAttempts?: Array<Record<string, unknown>>;
+  retries?: number;
+  catchAll?: boolean;
+  finalReason?: string | null;
+  worker?: { id?: string } | null;
+}
+
 export interface Contact {
   email: string;
   classification: Classification;
@@ -50,6 +61,12 @@ export interface Contact {
   deliverabilityScore?: number;
   score?: number;
   confidence?: Confidence;
+  /** Proven mailbox outcome (additive; catch-all → ACCEPT_ALL). */
+  mailboxStatus?: MailboxStatus;
+  /** Strength of SMTP/DNS evidence (additive). */
+  verificationQuality?: VerificationQuality;
+  smtpEvidence?: SmtpEvidence | null;
+  finalReason?: string | null;
   recommendedAction?: RecommendedAction;
   recommendation?: string;
   reasons?: string[];

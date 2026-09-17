@@ -8,9 +8,14 @@
 //               worker exists, delegate to the worker (DEFAULT)
 //   disabled  — perform no SMTP probing at all
 //
+// Multi-vantage: in `auto`, when local (e.g. Railway) cannot conclude, the
+// router also queries the independent VPS worker and AGGREGATES evidence.
+// A Railway timeout never overrides a VPS 550 — definitive rejection wins.
+//
 // Golden rule (enforced here): a transport/infrastructure failure is reported as
 // inconclusive, never as a negative mailbox verdict. "unknown stays unknown".
 import { SmtpProbe } from '../../domain/ports/index.js';
+import { aggregateVantageEvidence } from '../../domain/verification/smtp-classify.js';
 
 const WORKER_HEALTH_TTL_MS = 30_000;
 
@@ -48,7 +53,22 @@ export class SmtpRouter extends SmtpProbe {
 
   // Marker the engine keys off (existing behaviour): skipped => treated as
   // inconclusive => "unknown".
-  _skipped(reason) { return { skipped: true, reachable: null, source: 'none', reason }; }
+  _skipped(reason) {
+    return {
+      skipped: true,
+      reachable: null,
+      source: 'none',
+      reason,
+      smtpEvidence: {
+        vantages: [{ vantage: 'none', inconclusive: true, error: reason }],
+        mxAttempts: [],
+        retries: 0,
+        catchAll: false,
+        finalReason: reason || 'smtp_unavailable',
+        worker: null,
+      },
+    };
+  }
 
   async check(email, mxHosts) {
     if (this.mode === 'disabled') return this._skipped('disabled');
@@ -62,7 +82,7 @@ export class SmtpRouter extends SmtpProbe {
       return this._tagLocal(r);
     }
 
-    // ---- auto ----
+    // ---- auto (multi-vantage) ----
     // If we already know local port 25 is blocked, skip straight to the worker.
     if (this._localPort25 === false) {
       if (await this._workerAvailable()) return this._viaRemote(email, mxHosts);
@@ -78,35 +98,51 @@ export class SmtpRouter extends SmtpProbe {
     }
 
     const localRes = this._tagLocal(await this.local.check(email, mxHosts));
+    localRes.vantage = 'railway-local';
 
-    // Local produced a conclusive answer -> use it.
-    if (this._isConclusive(localRes)) return localRes;
-
-    // Local inconclusive/blocked -> try the worker if healthy.
-    if (await this._workerAvailable()) {
-      const remoteRes = await this._viaRemote(email, mxHosts);
-      // Prefer a conclusive remote answer; otherwise fall back to local's
-      // (still-inconclusive) result so the engine sees the best evidence.
-      if (this._isConclusive(remoteRes)) return remoteRes;
-      return remoteRes.reachable === false ? localRes : remoteRes;
+    // Local produced a conclusive answer -> use it (still attach evidence).
+    if (this._isConclusive(localRes)) {
+      return aggregateVantageEvidence([localRes]);
     }
 
-    return localRes;
+    // Local inconclusive/blocked -> try the worker if healthy and aggregate.
+    if (await this._workerAvailable()) {
+      const remoteRes = await this._viaRemote(email, mxHosts);
+      remoteRes.vantage = 'vps-worker';
+      // Aggregate: Railway timeout + VPS 550 → UNDELIVERABLE (rejection wins).
+      return aggregateVantageEvidence([localRes, remoteRes]);
+    }
+
+    return aggregateVantageEvidence([localRes]);
   }
 
   async _viaRemote(email, mxHosts) {
     const r = await this.remote.check(email, mxHosts);
     if (!r.source) r.source = 'smtp-worker';
-    this.log({ event: 'smtp_route', route: 'remote', email_domain: domainOf(email), reachable: r.reachable, source: r.source });
+    r.vantage = r.vantage || 'vps-worker';
+    this.log({
+      event: 'smtp_route',
+      route: 'remote',
+      email_domain: domainOf(email),
+      reachable: r.reachable,
+      source: r.source,
+    });
+    // Ensure evidence trail even on a single-vantage remote path.
+    if (!r.smtpEvidence) {
+      return aggregateVantageEvidence([r]);
+    }
     return r;
   }
 
   _tagLocal(r) {
-    if (r && r.reachable === true && !r.source) r.source = 'local-smtp';
+    if (!r) return r;
+    if (r.reachable === true && !r.source) r.source = 'local-smtp';
+    if (!r.vantage) r.vantage = 'railway-local';
     // Remember that local port 25 is blocked so future calls skip it fast.
-    if (r && (r.inconclusive || (r.reachable === false && (r.error === 'timeout' || r.error === 'connection-failed')))) {
+    if (r.inconclusive || (r.reachable === false && (r.error === 'timeout' || r.error === 'connection-failed'
+      || r.smtpClass === 'timeout' || r.smtpClass === 'connection_refused'))) {
       if (this._localPort25 !== true) this._localPort25 = false;
-    } else if (r && r.reachable === true) {
+    } else if (r.reachable === true) {
       this._localPort25 = true;
     }
     return r;
@@ -138,9 +174,21 @@ export class SmtpRouter extends SmtpProbe {
     if (this.mode === 'auto' && this.remote && this.remote.configured) {
       const rt = await this.remote.selfTest();
       if (rt.available) {
-        return { available: true, reason: 'ok', detail: `local port 25 blocked; using worker (${rt.detail})`, mode: this.mode, source: 'smtp-worker' };
+        return {
+          available: true,
+          reason: 'ok',
+          detail: `local port 25 blocked; using worker (${rt.detail})`,
+          mode: this.mode,
+          source: 'smtp-worker',
+        };
       }
-      return { available: false, reason: 'no-smtp', detail: `local blocked and worker unavailable (${rt.reason})`, mode: this.mode, source: 'none' };
+      return {
+        available: false,
+        reason: 'no-smtp',
+        detail: `local blocked and worker unavailable (${rt.reason})`,
+        mode: this.mode,
+        source: 'none',
+      };
     }
     return { available: false, reason: lt.reason, detail: lt.detail, mode: this.mode, source: 'none' };
   }

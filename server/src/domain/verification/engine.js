@@ -10,9 +10,12 @@
 //   deliverability   : 'deliverable' | 'undeliverable' | 'risky' | 'unknown'
 //   deliverabilityScore : 0-100 technical score (NOT penalised for being role-based)
 //   confidence       : 'high' | 'medium' | 'low' | 'unknown'
+//   mailboxStatus    : 'DELIVERABLE' | 'UNDELIVERABLE' | 'ACCEPT_ALL' | 'UNKNOWN'
+//   verificationQuality : 'HIGH' | 'MEDIUM' | 'LOW'
 //   riskSignals      : [ { code, label, detail } ]  descriptive characteristics
 //   recommendedAction: 'keep' | 'review' | 'remove' | 'reverify'
 //   evidence         : [ { status, label } ]  observable technical checks
+//   smtpEvidence     : structured MX/SMTP/vantage trail
 //   reasons          : plain-language explanation
 //   recommendation   : what the sender should do and why
 //
@@ -22,6 +25,12 @@
 // (DnsResolver, SmtpProbe, VerificationProvider) and datasets through
 // ReferenceData. The engine itself imports no framework or Node network module.
 import { normalizeEmail, checkSyntax, parseEmail } from './syntax.js';
+import {
+  MAILBOX_STATUS,
+  VERIFICATION_QUALITY,
+  toMailboxStatus,
+  toVerificationQuality,
+} from './smtp-classify.js';
 
 function evidence(status, label) { return { status, label }; }
 function risk(code, label, detail) { return { code, label, detail }; }
@@ -34,6 +43,8 @@ export const DELIVERABILITY = {
 };
 export const CONFIDENCE = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low', UNKNOWN: 'unknown' };
 export const ACTION = { KEEP: 'keep', REVIEW: 'review', REMOVE: 'remove', REVERIFY: 'reverify' };
+
+export { MAILBOX_STATUS, VERIFICATION_QUALITY };
 
 export class VerificationEngine {
   /**
@@ -89,11 +100,14 @@ export class VerificationEngine {
         deliverability: DELIVERABILITY.UNDELIVERABLE,
         deliverabilityScore: 0,
         confidence: CONFIDENCE.HIGH,
+        mailboxStatus: MAILBOX_STATUS.UNDELIVERABLE,
+        verificationQuality: VERIFICATION_QUALITY.HIGH,
         riskSignals: risks,
         recommendedAction: ACTION.REMOVE,
         evidence: ev,
         reasons,
         recommendation: 'Remove. The address is malformed and cannot receive mail.',
+        finalReason: 'invalid_syntax',
       });
     }
     ev.push(evidence('pass', 'Valid syntax'));
@@ -111,11 +125,14 @@ export class VerificationEngine {
         deliverability: DELIVERABILITY.UNDELIVERABLE,
         deliverabilityScore: 0,
         confidence: CONFIDENCE.HIGH,
+        mailboxStatus: MAILBOX_STATUS.UNDELIVERABLE,
+        verificationQuality: VERIFICATION_QUALITY.HIGH,
         riskSignals: risks,
         recommendedAction: ACTION.REMOVE,
         evidence: ev,
         reasons,
         recommendation: 'Remove. Reserved/example domains cannot receive mail.',
+        finalReason: 'reserved_domain',
       });
     }
 
@@ -140,11 +157,14 @@ export class VerificationEngine {
         deliverability: DELIVERABILITY.UNDELIVERABLE,
         deliverabilityScore: 10,
         confidence: CONFIDENCE.HIGH,
+        mailboxStatus: MAILBOX_STATUS.UNDELIVERABLE,
+        verificationQuality: VERIFICATION_QUALITY.HIGH,
         riskSignals: risks,
         recommendedAction: ACTION.REMOVE,
         evidence: ev,
         reasons,
         recommendation: 'Remove. Disposable/temporary mailboxes should not be contacted.',
+        finalReason: 'disposable_domain',
       });
     }
     ev.push(evidence('pass', 'Not disposable'));
@@ -171,11 +191,14 @@ export class VerificationEngine {
         deliverability: DELIVERABILITY.UNDELIVERABLE,
         deliverabilityScore: 5,
         confidence: CONFIDENCE.HIGH,
+        mailboxStatus: MAILBOX_STATUS.UNDELIVERABLE,
+        verificationQuality: VERIFICATION_QUALITY.HIGH,
         riskSignals: risks,
         recommendedAction: ACTION.REMOVE,
         evidence: ev,
         reasons,
         recommendation: 'Remove. The domain does not exist and mail will bounce.',
+        finalReason: 'domain_missing',
       });
     }
     ev.push(evidence('pass', 'Domain exists'));
@@ -188,7 +211,7 @@ export class VerificationEngine {
         'The domain has no MX records; mail may still be accepted via its A record but this is less reliable.'));
     }
 
-    // STEP 6 — SMTP MAILBOX PROBE (via the SMTP router: local or worker)
+    // STEP 6 — SMTP MAILBOX PROBE (via the SMTP router: local and/or worker)
     const smtp = await this.smtp.check(email, dnsResult.mxHosts);
     const smtpSource = smtp.source || (smtp.skipped ? 'none' : null);
     let catchAll = false;
@@ -208,6 +231,14 @@ export class VerificationEngine {
       mxUnreachable = !!(smtp.mxUnreachable || smtp.triedHosts?.length);
       if (mxUnreachable) {
         ev.push(evidence('info', 'Mail servers did not complete an SMTP handshake'));
+      } else if (smtp.smtpClass === 'timeout' || smtp.error === 'timeout' || smtp.error === 'worker-timeout') {
+        ev.push(evidence('info', 'SMTP probe timed out (unconfirmed)'));
+      } else if (smtp.smtpClass === 'connection_refused') {
+        ev.push(evidence('info', 'SMTP connection refused (unconfirmed)'));
+      } else if (smtp.smtpClass === 'tls_failure') {
+        ev.push(evidence('info', 'SMTP TLS failure (unconfirmed)'));
+      } else if (smtp.smtpClass === 'rate_limited' || smtp.smtpClass === 'blocked') {
+        ev.push(evidence('info', 'SMTP path rate-limited or blocked (unconfirmed)'));
       } else {
         ev.push(evidence('info', 'SMTP could not be probed (outbound port 25 unavailable)'));
       }
@@ -236,6 +267,11 @@ export class VerificationEngine {
 
     const greylisted = !!(smtp.reachable && smtp.temporaryFailure);
     const mailboxRejected = !!(smtp.reachable && smtp.mailboxRejected);
+    // Catch-all MUST win over a raw 250 on the real address — both accepting
+    // proves ACCEPT_ALL, not DELIVERABLE.
+    const mailboxConfirmed = !catchAll && (
+      (smtpProbed && smtp.mailboxExists) || false
+    );
 
     // STEP 7 — EXTERNAL PROVIDER (only if local evidence is inconclusive)
     let provider = null;
@@ -259,10 +295,13 @@ export class VerificationEngine {
       }
     }
 
+    const providerConfirmed = !!(provider && provider.deliverable === true && !catchAll);
+    const providerRejected = !!(provider && provider.deliverable === false);
+
     // COMBINE
     const facts = {
-      mailboxConfirmed: (smtpProbed && smtp.mailboxExists) || (provider && provider.deliverable === true),
-      mailboxRejected: mailboxRejected || (provider && provider.deliverable === false),
+      mailboxConfirmed: mailboxConfirmed || providerConfirmed,
+      mailboxRejected: mailboxRejected || providerRejected,
       catchAll,
       greylisted,
       smtpUnavailable,
@@ -271,36 +310,49 @@ export class VerificationEngine {
       aOnly: dnsResult.aRecord && !dnsResult.hasMx,
       role,
       risks,
+      multiVantageAgree: !!smtp.multiVantageAgree,
     };
 
     const deliverability = assessDeliverability(facts);
     const confidence = assessConfidence(facts);
     const deliverabilityScore = scoreDeliverability(facts, deliverability);
     const recommendedAction = recommendAction({ deliverability, confidence, facts });
+    const mailboxStatus = toMailboxStatus(facts);
+    const verificationQuality = toVerificationQuality(facts);
 
-    buildReasons({ reasons, deliverability, confidence, facts });
+    const smtpEvidence = buildSmtpEvidence(smtp, {
+      finalReason: finalReasonFor({ deliverability, facts, smtp }),
+    });
+
+    buildReasons({ reasons, deliverability, confidence, facts, mailboxStatus });
 
     return finalize(email, {
       deliverability,
       deliverabilityScore,
       confidence,
+      mailboxStatus,
+      verificationQuality,
       riskSignals: risks,
       recommendedAction,
       evidence: ev,
       reasons,
-      recommendation: recommendationText({ deliverability, confidence, recommendedAction, facts }),
+      recommendation: recommendationText({ deliverability, confidence, recommendedAction, facts, mailboxStatus }),
       greylisted,
       provider: provider?.provider || null,
       smtpSource,
+      smtpEvidence,
+      finalReason: smtpEvidence.finalReason,
     });
   }
 }
 
 // ---- Dimension 1: technical deliverability --------------------------------
+// Catch-all is checked BEFORE confirmed: real+random both 250 → risky/ACCEPT_ALL,
+// never deliverable.
 function assessDeliverability(f) {
   if (f.mailboxRejected) return DELIVERABILITY.UNDELIVERABLE;
-  if (f.mailboxConfirmed) return DELIVERABILITY.DELIVERABLE;
   if (f.catchAll) return DELIVERABILITY.RISKY;
+  if (f.mailboxConfirmed) return DELIVERABILITY.DELIVERABLE;
   return DELIVERABILITY.UNKNOWN;
 }
 
@@ -335,15 +387,60 @@ function recommendAction({ deliverability, facts }) {
   return ACTION.REVIEW;
 }
 
+function finalReasonFor({ deliverability, facts, smtp }) {
+  if (smtp?.smtpEvidence?.finalReason) return smtp.smtpEvidence.finalReason;
+  if (deliverability === DELIVERABILITY.UNDELIVERABLE) return 'definitive_recipient_rejection';
+  if (facts.catchAll) return 'catch_all_domain';
+  if (deliverability === DELIVERABILITY.DELIVERABLE) return 'mailbox_accepted';
+  if (facts.greylisted) return 'temporary_failure';
+  if (facts.mxUnreachable) return 'all_mx_unreachable';
+  if (facts.smtpUnavailable) return 'smtp_unavailable';
+  return 'unconfirmed';
+}
+
+function buildSmtpEvidence(smtp, { finalReason }) {
+  const base = smtp?.smtpEvidence && typeof smtp.smtpEvidence === 'object'
+    ? { ...smtp.smtpEvidence }
+    : {
+      vantages: smtp ? [{
+        vantage: smtp.vantage || smtp.source || 'unknown',
+        source: smtp.source || null,
+        reachable: smtp.reachable,
+        inconclusive: !!(smtp.inconclusive || smtp.skipped),
+        mailboxExists: !!smtp.mailboxExists,
+        mailboxRejected: !!smtp.mailboxRejected,
+        temporaryFailure: !!smtp.temporaryFailure,
+        catchAll: !!smtp.catchAll,
+        code: smtp.code ?? null,
+        error: smtp.error || null,
+        smtpClass: smtp.smtpClass || null,
+        mxHost: smtp.mxHost || null,
+        triedHosts: smtp.triedHosts || [],
+        workerId: smtp.workerId || null,
+        responseTimeMs: smtp.responseTimeMs ?? null,
+      }] : [],
+      mxAttempts: smtp?.mxAttempts || [],
+      retries: smtp?.attempts || smtp?.retries || 0,
+      catchAll: !!smtp?.catchAll,
+      worker: smtp?.workerId ? { id: smtp.workerId } : null,
+    };
+
+  return {
+    ...base,
+    finalReason: finalReason || base.finalReason || 'unconfirmed',
+    catchAll: base.catchAll ?? !!smtp?.catchAll,
+  };
+}
+
 // ---- Explanation ----------------------------------------------------------
-function buildReasons({ reasons, deliverability, confidence, facts }) {
-  if (deliverability === DELIVERABILITY.DELIVERABLE) {
-    reasons.push('The mailbox was directly confirmed to exist and can receive mail.');
-  } else if (deliverability === DELIVERABILITY.RISKY && facts.catchAll) {
+function buildReasons({ reasons, deliverability, confidence, facts, mailboxStatus }) {
+  if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || (deliverability === DELIVERABILITY.RISKY && facts.catchAll)) {
     reasons.push(
       'The domain is catch-all: it accepts mail for any address, so this specific ' +
       'mailbox cannot be independently confirmed. The address may well be valid.'
     );
+  } else if (deliverability === DELIVERABILITY.DELIVERABLE) {
+    reasons.push('The mailbox was directly confirmed to exist and can receive mail.');
   } else if (deliverability === DELIVERABILITY.UNKNOWN) {
     if (facts.mxUnreachable) {
       reasons.push(
@@ -351,14 +448,14 @@ function buildReasons({ reasons, deliverability, confidence, facts }) {
         'servers completed an SMTP handshake from this verifier. The mailbox is ' +
         'unconfirmed, not undeliverable.'
       );
+    } else if (facts.greylisted) {
+      reasons.push('The server returned a temporary (greylisting) response; a retry later should resolve it.');
     } else if (facts.smtpUnavailable) {
       reasons.push(
         'Syntax, domain and MX records are healthy, but mailbox existence could not ' +
         'be directly confirmed because SMTP probing was unavailable. This is unconfirmed, ' +
         'not undeliverable.'
       );
-    } else if (facts.greylisted) {
-      reasons.push('The server returned a temporary (greylisting) response; a retry later should resolve it.');
     } else {
       reasons.push('Domain and MX are healthy, but the mailbox itself was not confirmed.');
     }
@@ -373,7 +470,7 @@ function buildReasons({ reasons, deliverability, confidence, facts }) {
   reasons.push(`Evidence confidence: ${confidence}.`);
 }
 
-function recommendationText({ recommendedAction, facts }) {
+function recommendationText({ recommendedAction, facts, mailboxStatus }) {
   switch (recommendedAction) {
     case ACTION.REMOVE:
       return 'REMOVE — strong technical evidence this address cannot receive mail.';
@@ -386,7 +483,7 @@ function recommendationText({ recommendedAction, facts }) {
              'Re-check where live SMTP verification is available.';
     case ACTION.REVIEW:
     default:
-      return facts.catchAll
+      return mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll
         ? 'REVIEW — catch-all domain; the mailbox cannot be independently confirmed. ' +
           'Safe to keep for low-volume/known contacts; verify before large campaigns.'
         : 'REVIEW — evidence is mixed; a human decision is recommended.';
@@ -399,11 +496,16 @@ function finalize(email, r) {
     deliverability: r.deliverability,
     deliverabilityScore: r.deliverabilityScore,
     confidence: r.confidence,
+    // Additive proven-mailbox + evidence-quality dimensions (UI/API compatible).
+    mailboxStatus: r.mailboxStatus || MAILBOX_STATUS.UNKNOWN,
+    verificationQuality: r.verificationQuality || VERIFICATION_QUALITY.LOW,
     riskSignals: r.riskSignals || [],
     recommendedAction: r.recommendedAction,
     evidence: r.evidence || [],
     reasons: r.reasons || [],
     recommendation: r.recommendation,
+    smtpEvidence: r.smtpEvidence || null,
+    finalReason: r.finalReason || null,
 
     // ---- Backward-compatible derived fields ----
     score: r.deliverabilityScore,

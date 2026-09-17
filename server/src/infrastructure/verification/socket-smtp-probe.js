@@ -1,11 +1,25 @@
 // SmtpProbe adapter using a raw TCP socket. Performs an SMTP conversation up
 // to (but never completing) RCPT TO, so no mail is sent. Also probes a random
 // address to detect catch-all domains.
+//
+// MX hosts are walked in DNS priority order. A primary timeout/refusal falls
+// through to the next MX — only a completed SMTP conversation is authoritative.
 import net from 'node:net';
 import { SmtpProbe } from '../../domain/ports/index.js';
+import {
+  classifySmtpCode,
+  classifyTransportError,
+  SMTP_CLASS,
+} from '../../domain/verification/smtp-classify.js';
+import {
+  SmtpResultCache,
+  DomainRateLimiter,
+  withTransportRetry,
+  SMTP_POLICY_DEFAULTS,
+} from './smtp-policy.js';
 
 function randomLocalPart() {
-  return 'no-such-user-' + Math.random().toString(36).slice(2, 12);
+  return 'no-such-user-' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
 }
 
 // Runs one SMTP conversation against `host` and returns the RCPT result codes.
@@ -17,11 +31,19 @@ function randomLocalPart() {
 // as the client waits for all responses before issuing QUIT.
 function probe(host, from, recipients, timeoutMs) {
   return new Promise((resolve) => {
+    const started = Date.now();
     const socket = net.createConnection({ host, port: 25 });
     socket.setEncoding('utf8');
     socket.setTimeout(timeoutMs);
 
-    const out = { connected: false, greeting: null, rcpt: {}, error: null };
+    const out = {
+      connected: false,
+      greeting: null,
+      rcpt: {},       // recipient -> code
+      rcptText: {},   // recipient -> response text
+      error: null,
+      responseTimeMs: 0,
+    };
     let step = 0;
     let rcptIndex = 0;
     let buffer = '';
@@ -40,6 +62,7 @@ function probe(host, from, recipients, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(hardTimer);
+      out.responseTimeMs = Date.now() - started;
       try { socket.destroy(); } catch { /* ignore */ }
       resolve(out);
     }
@@ -55,6 +78,7 @@ function probe(host, from, recipients, timeoutMs) {
 
     function handleResponse(codeLine) {
       const code = parseInt(codeLine.slice(0, 3), 10);
+      const message = codeLine.slice(4).trim();
       switch (step) {
         case 0: // SMTP greeting
           out.connected = true;
@@ -83,6 +107,7 @@ function probe(host, from, recipients, timeoutMs) {
           break; // next response will be the first RCPT TO
         case 3: // RCPT TO response(s)
           out.rcpt[recipients[rcptIndex]] = code;
+          out.rcptText[recipients[rcptIndex]] = message;
           rcptIndex += 1;
           if (rcptIndex < recipients.length) {
             // more RCPT TO responses expected from the pipeline
@@ -123,11 +148,12 @@ const CATCHALL_TTL_MS = 10 * 60 * 1000;
 
 // Prefer the primary MX, but fall back when it is unreachable. Caps keep bulk
 // verification from walking long MX lists (each miss costs a full timeout).
-export const MAX_MX_ATTEMPTS = 3;
+export const MAX_MX_ATTEMPTS = 5;
 
 export class SocketSmtpProbe extends SmtpProbe {
   /**
-   * @param {{enabled:boolean, from:string, timeoutMs:number, probeFn?: Function}} smtpConfig
+   * @param {{enabled:boolean, from:string, timeoutMs:number, probeFn?: Function,
+   *          maxRetries?: number, cacheTtlMs?: number, domainMinIntervalMs?: number}} smtpConfig
    * `probeFn` is injectable for unit tests; production uses the socket probe.
    */
   constructor(smtpConfig) {
@@ -135,6 +161,13 @@ export class SocketSmtpProbe extends SmtpProbe {
     this.cfg = smtpConfig;
     this._probe = smtpConfig.probeFn || probe;
     this._catchAll = new Map(); // domain -> { at, isCatchAll }
+    this._cache = new SmtpResultCache({
+      ttlMs: smtpConfig.cacheTtlMs ?? SMTP_POLICY_DEFAULTS.cacheTtlMs,
+    });
+    this._rate = new DomainRateLimiter({
+      minIntervalMs: smtpConfig.domainMinIntervalMs ?? SMTP_POLICY_DEFAULTS.domainMinIntervalMs,
+    });
+    this._maxRetries = smtpConfig.maxRetries ?? SMTP_POLICY_DEFAULTS.maxRetries;
   }
 
   _catchAllCached(domain) {
@@ -147,15 +180,26 @@ export class SocketSmtpProbe extends SmtpProbe {
   }
 
   async check(email, mxHosts) {
-    if (!this.cfg.enabled) return { skipped: true, reachable: null };
-    if (!mxHosts || mxHosts.length === 0) return { reachable: false, error: 'no-mx' };
+    if (!this.cfg.enabled) return { skipped: true, reachable: null, source: 'none' };
+    if (!mxHosts || mxHosts.length === 0) {
+      return {
+        reachable: false,
+        error: 'no-mx',
+        inconclusive: true,
+        smtpClass: SMTP_CLASS.UNKNOWN,
+        mxAttempts: [],
+      };
+    }
 
+    const cached = this._cache.get(email);
+    if (cached) return { ...cached, source: cached.source || 'local-smtp' };
+
+    return this._rate.schedule(email, () => this._checkUncached(email, mxHosts));
+  }
+
+  async _checkUncached(email, mxHosts) {
     const from = this.cfg.from;
     const domain = email.split('@')[1];
-
-    const accepts = (c) => typeof c === 'number' && c >= 200 && c < 300;
-    const rejects = (c) => typeof c === 'number' && c >= 500 && c < 600;
-    const temp = (c) => typeof c === 'number' && c >= 400 && c < 500;
 
     // If we already know this domain's catch-all status, skip the extra random
     // RCPT and probe only the real mailbox.
@@ -168,52 +212,132 @@ export class SocketSmtpProbe extends SmtpProbe {
     // authoritative — do not hop to a secondary MX for a different answer.
     const hosts = [...new Set(mxHosts.filter(Boolean))].slice(0, MAX_MX_ATTEMPTS);
     const triedHosts = [];
+    const mxAttempts = [];
     let lastError = 'connection-failed';
+    let lastClass = SMTP_CLASS.UNKNOWN;
+    let totalAttempts = 0;
 
     for (const host of hosts) {
       triedHosts.push(host);
-      const res = await this._probe(host, from, recipients, this.cfg.timeoutMs);
+
+      const { result: res, attempts } = await withTransportRetry(
+        () => this._probe(host, from, recipients, this.cfg.timeoutMs),
+        {
+          maxRetries: this._maxRetries,
+          isRetryable: (r) => {
+            if (!r || r.connected) return false;
+            const cls = classifyTransportError(r.error);
+            // Quick retry on refused/reset; do not burn another full timeout.
+            return cls === SMTP_CLASS.CONNECTION_REFUSED || cls === SMTP_CLASS.UNKNOWN;
+          },
+        },
+      );
+      totalAttempts += attempts;
 
       if (!res.connected) {
         lastError = res.error || 'connection-failed';
+        lastClass = classifyTransportError(res.error) || SMTP_CLASS.UNKNOWN;
+        mxAttempts.push({
+          mxHost: host,
+          outcome: lastClass,
+          error: lastError,
+          code: null,
+          response: null,
+          responseTimeMs: res.responseTimeMs ?? null,
+          attempts,
+        });
+        // Primary timed out / refused → try the next MX. Do NOT stop.
         continue;
       }
 
       const mailboxCode = res.rcpt[email];
+      const mailboxText = res.rcptText?.[email] || '';
+      const mailboxClass = classifySmtpCode(mailboxCode, mailboxText);
+      const accepted = mailboxClass === SMTP_CLASS.ACCEPTED;
+      const rejected = mailboxClass === SMTP_CLASS.REJECTED;
+
       let isCatchAll;
       let probeCode;
+      let probeClass;
       if (catchAllProbe) {
         probeCode = res.rcpt[catchAllProbe];
-        isCatchAll = accepts(probeCode);
+        const probeText = res.rcptText?.[catchAllProbe] || '';
+        probeClass = classifySmtpCode(probeCode, probeText);
+        // ACCEPT_ALL only when BOTH real + random are accepted.
+        isCatchAll = accepted && probeClass === SMTP_CLASS.ACCEPTED;
         // Only cache a confident (accept/reject) result, not a transient temp/no-reply.
-        if (accepts(probeCode) || rejects(probeCode)) this._setCatchAll(domain, isCatchAll);
+        if (probeClass === SMTP_CLASS.ACCEPTED || probeClass === SMTP_CLASS.REJECTED) {
+          this._setCatchAll(domain, isCatchAll);
+        }
       } else {
         isCatchAll = knownCatchAll;
         probeCode = undefined;
+        probeClass = undefined;
       }
 
-      return {
+      // Catch-all means the specific mailbox cannot be proven — never report
+      // mailboxExists alongside catchAll (would become false DELIVERABLE).
+      const temporary = mailboxClass === SMTP_CLASS.TEMPORARY
+        || mailboxClass === SMTP_CLASS.RATE_LIMITED
+        || (probeClass === SMTP_CLASS.TEMPORARY);
+
+      // Blocked / rate-limited at conversation level is inconclusive for the mailbox.
+      const pathBlocked = mailboxClass === SMTP_CLASS.BLOCKED
+        || mailboxClass === SMTP_CLASS.RATE_LIMITED;
+
+      mxAttempts.push({
+        mxHost: host,
+        outcome: pathBlocked ? mailboxClass : (accepted ? 'accepted' : (rejected ? 'rejected' : mailboxClass)),
+        error: null,
+        code: mailboxCode ?? null,
+        response: mailboxText ? mailboxText.slice(0, 200) : null,
+        responseTimeMs: res.responseTimeMs ?? null,
+        attempts,
+      });
+
+      if (pathBlocked) {
+        // Treat as transport-ish failure for THIS host; try next MX if any remain.
+        lastError = mailboxClass;
+        lastClass = mailboxClass;
+        continue;
+      }
+
+      const result = {
         reachable: true,
-        mailboxExists: accepts(mailboxCode),
-        mailboxRejected: rejects(mailboxCode),
-        temporaryFailure: temp(mailboxCode) || (probeCode !== undefined && temp(probeCode)),
-        catchAll: isCatchAll,
+        // ACCEPT_ALL wins over DELIVERABLE when both real + random accept.
+        mailboxExists: accepted && !isCatchAll,
+        mailboxRejected: rejected,
+        temporaryFailure: temporary && !rejected && !accepted,
+        catchAll: !!isCatchAll,
         code: mailboxCode,
+        response: mailboxText ? mailboxText.slice(0, 200) : null,
         probeCode,
-        greylisted: temp(mailboxCode),
+        greylisted: mailboxClass === SMTP_CLASS.TEMPORARY,
+        smtpClass: isCatchAll ? 'catch-all' : mailboxClass,
         mxHost: host,
         triedHosts,
+        mxAttempts,
+        attempts: totalAttempts,
+        responseTimeMs: res.responseTimeMs ?? null,
+        source: 'local-smtp',
       };
+
+      this._cache.set(email, result);
+      return result;
     }
 
     // Never strong enough evidence to mark undeliverable — primary (and any
-    // tried backups) did not complete a handshake. Treat as inconclusive.
+    // tried backups) did not complete a usable handshake. Treat as inconclusive.
     return {
       reachable: false,
       error: lastError,
+      smtpClass: lastClass,
       inconclusive: true,
       triedHosts,
+      mxAttempts,
+      attempts: totalAttempts,
       mxUnreachable: true,
+      source: 'local-smtp',
     };
   }
 
@@ -226,10 +350,12 @@ export class SocketSmtpProbe extends SmtpProbe {
     if (res.connected) {
       return { available: true, reason: 'ok', detail: `connected to ${host}:25` };
     }
+    const cls = classifyTransportError(res.error);
     return {
       available: false,
-      reason: res.error === 'timeout' ? 'port25_blocked' : (res.error || 'unreachable'),
+      reason: cls === SMTP_CLASS.TIMEOUT ? 'port25_blocked' : (res.error || 'unreachable'),
       detail: `could not reach ${host}:25 (${res.error || 'no connection'}); outbound port 25 is likely blocked`,
+      smtpClass: cls,
     };
   }
 }

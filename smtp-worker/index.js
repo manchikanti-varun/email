@@ -11,7 +11,7 @@ import express from 'express';
 import dns from 'node:dns/promises';
 
 import { config, assertConfig } from './config.js';
-import { smtpConversation, classifyCode, isTransportFailure } from './smtp-probe.js';
+import { smtpConversation, classifyCode, isTransportFailure, classifyTransportError } from './smtp-probe.js';
 import {
   catchAllAddress, isCatchAll,
   getCachedCatchAll, setCachedCatchAll,
@@ -70,7 +70,7 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
   // Resolve MX list if the caller didn't supply hosts (the main app usually
   // does, to avoid duplicate DNS work — but we support both). Prefer an
   // explicit mxHosts[] so we can fall back when the primary MX is unreachable.
-  const MAX_MX_ATTEMPTS = 3;
+  const MAX_MX_ATTEMPTS = 5;
   let mxHosts = [];
   if (Array.isArray(req.body.mxHosts) && req.body.mxHosts.length) {
     mxHosts = req.body.mxHosts.map(String);
@@ -99,12 +99,17 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
     const recipients = probeAddr ? [email, probeAddr] : [email];
 
     const triedHosts = [];
+    const mxAttempts = [];
     let conv = null;
     let attempts = 0;
     let mxHost = mxHosts[0];
 
     // Transport-only fallback across MX hosts. A connected primary that
-    // greylists/rejects is authoritative — do not hop for a different answer.
+    // greylists/rejects/accepts is authoritative — do not hop for a different
+    // answer. Primary timeout / refused / rate-limited / blocked MUST fall
+    // through to the next MX.
+    let settledMailbox = null; // { target, targetStatus, catchAll, probeStatus }
+
     for (const host of mxHosts) {
       mxHost = host;
       triedHosts.push(host);
@@ -118,19 +123,76 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
       );
       conv = run.result;
       attempts += run.attempts;
-      if (conv.connected && !isTransportFailure(conv.error)) break;
+
+      if (!conv.connected || isTransportFailure(conv.error)) {
+        mxAttempts.push({
+          mxHost: host,
+          outcome: classifyTransportError(conv.error) || 'unknown',
+          error: conv.error || 'connection-failed',
+          code: null,
+          response: null,
+          responseTimeMs: conv.responseTimeMs || 0,
+          attempts: run.attempts,
+        });
+        continue; // try next MX
+      }
+
+      const target = conv.rcpt[email] || {};
+      const targetStatus = classifyCode(target.code, target.message);
+
+      // Path-level blocks are not mailbox evidence — try the next MX.
+      if (targetStatus === 'rate_limited' || targetStatus === 'blocked') {
+        mxAttempts.push({
+          mxHost: host,
+          outcome: targetStatus,
+          error: targetStatus,
+          code: target.code ?? null,
+          response: (target.message || '').slice(0, 200) || null,
+          responseTimeMs: conv.responseTimeMs || 0,
+          attempts: run.attempts,
+        });
+        continue;
+      }
+
+      let catchAll;
+      let probeStatus = null;
+      if (probeAddr) {
+        const probe = conv.rcpt[probeAddr] || {};
+        probeStatus = classifyCode(probe.code, probe.message);
+        catchAll = isCatchAll({ targetStatus, probeStatus });
+        if (probeStatus === 'accepted' || probeStatus === 'rejected') {
+          setCachedCatchAll(domain, catchAll);
+        }
+      } else {
+        catchAll = knownCatchAll;
+      }
+
+      mxAttempts.push({
+        mxHost: host,
+        outcome: catchAll ? 'catch-all' : targetStatus,
+        error: null,
+        code: target.code ?? null,
+        response: (target.message || '').slice(0, 200) || null,
+        responseTimeMs: conv.responseTimeMs,
+        attempts: run.attempts,
+      });
+
+      settledMailbox = { target, targetStatus, catchAll, probeStatus };
+      break;
     }
 
     // Transport failure => evidence about the connection, NOT the mailbox.
-    if (!conv || !conv.connected || isTransportFailure(conv.error)) {
+    if (!settledMailbox) {
       const evidence = {
         status: 'unknown',
         code: null,
         response: null,
         mxHost,
         triedHosts,
+        mxAttempts,
         responseTimeMs: conv?.responseTimeMs || 0,
         error: conv?.error || 'connection-failed',
+        errorClass: classifyTransportError(conv?.error) || 'unknown',
         attempts,
       };
       metrics.record({ ...evidence, connected: !!conv?.connected });
@@ -142,36 +204,26 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
       });
     }
 
-    const target = conv.rcpt[email] || {};
-    const targetStatus = classifyCode(target.code);
-    let catchAll;
-    if (probeAddr) {
-      const probe = conv.rcpt[probeAddr] || {};
-      const probeStatus = classifyCode(probe.code);
-      catchAll = isCatchAll({ targetStatus, probeStatus });
-      // Only cache confident accept/reject of the random probe, not temp/no-reply.
-      if (probeStatus === 'accepted' || probeStatus === 'rejected') {
-        setCachedCatchAll(domain, catchAll);
-      }
-    } else {
-      catchAll = knownCatchAll;
-    }
+    const { target, targetStatus, catchAll, probeStatus } = settledMailbox;
+    const status = catchAll ? 'catch-all' : targetStatus;
 
     const evidence = {
-      status: catchAll ? 'catch-all' : targetStatus, // accepted|rejected|temporary|catch-all|unknown
+      status, // accepted|rejected|temporary|catch-all|unknown
       code: target.code ?? null,
       response: (target.message || '').slice(0, 200) || null,
       mxHost,
       triedHosts,
+      mxAttempts,
       responseTimeMs: conv.responseTimeMs,
       attempts,
+      probeStatus,
     };
     metrics.record({ ...evidence, connected: true, catchAll });
 
     res.json({
       email,
       smtp: evidence,
-      catchAll,
+      catchAll: !!catchAll,
       worker: { id: config.workerId, region: config.region },
     });
   } catch (e) {

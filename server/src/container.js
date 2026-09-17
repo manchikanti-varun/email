@@ -97,7 +97,14 @@ export function createContainer() {
   // outbound port 25 on this host) and a remote MailHealth SMTP worker (runs
   // where port 25 is open). The engine only sees the router. This is what lets
   // the main app run on hosts that block port 25 without any third-party API.
-  const localSmtpProbe = new SocketSmtpProbe({ ...config.smtp, from: config.smtp.from });
+  const localSmtpProbe = new SocketSmtpProbe({
+    enabled: config.smtp.enabled,
+    from: config.smtp.from,
+    timeoutMs: config.smtp.timeoutMs,
+    maxRetries: config.smtp.maxRetries,
+    domainMinIntervalMs: config.smtp.domainMinIntervalMs,
+    cacheTtlMs: config.smtp.cacheTtlMs,
+  });
   const remoteSmtpProbe = new RemoteSmtpProbe({
     url: config.smtpWorker.url,
     secret: config.smtpWorker.secret,
