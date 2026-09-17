@@ -16,10 +16,36 @@ export class SqliteContactRepository extends ContactRepository {
     );
   }
 
+  /**
+   * Bulk-insert contacts. Uses multi-row INSERT chunks inside one transaction —
+   * much faster than one statement per email for large lists.
+   */
   insertMany(listId, emails) {
-    const insert = this.db.prepare('INSERT INTO contacts (id, list_id, email) VALUES (?, ?, ?)');
+    if (!emails || emails.length === 0) return;
+    // 250 rows × 3 binds = 750 vars (under common SQLite 999 bind default).
+    const CHUNK = 250;
+    const stmtCache = new Map(); // chunkLen -> prepared statement
+    const stmtFor = (n) => {
+      let s = stmtCache.get(n);
+      if (!s) {
+        const placeholders = Array.from({ length: n }, () => '(?, ?, ?)').join(',');
+        s = this.db.prepare(`INSERT INTO contacts (id, list_id, email) VALUES ${placeholders}`);
+        stmtCache.set(n, s);
+      }
+      return s;
+    };
     const tx = this.db.transaction((items) => {
-      for (const e of items) insert.run(nanoid(), listId, e);
+      for (let i = 0; i < items.length; i += CHUNK) {
+        const slice = items.slice(i, i + CHUNK);
+        const binds = new Array(slice.length * 3);
+        let b = 0;
+        for (const e of slice) {
+          binds[b++] = nanoid();
+          binds[b++] = listId;
+          binds[b++] = e;
+        }
+        stmtFor(slice.length).run(...binds);
+      }
     });
     tx(emails);
   }

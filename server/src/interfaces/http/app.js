@@ -43,7 +43,14 @@ export function buildApp(container) {
     },
     crossOriginEmbedderPolicy: false,
   }));
-  app.use(compression());
+  // Skip gzip for NDJSON upload progress streams so stage events flush promptly.
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.query?.progress === '1') return false;
+      if ((req.headers.accept || '').includes('application/x-ndjson')) return false;
+      return compression.filter(req, res);
+    },
+  }));
   app.use(makeRequestLogger(config));
 
   app.use(cors({

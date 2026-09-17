@@ -11,19 +11,42 @@ export class UploadList {
     this.parseUpload = parseUpload;
   }
 
-  execute(userId, fileBuffer, originalName) {
+  /**
+   * @param {string} userId
+   * @param {Buffer} fileBuffer
+   * @param {string} originalName
+   * @param {{ onProgress?: (evt: { stage: string, total?: number }) => void }} [opts]
+   */
+  execute(userId, fileBuffer, originalName, opts = {}) {
+    const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
     if (!fileBuffer) throw new AppError(400, 'No file uploaded');
+
+    const t0 = Date.now();
+    onProgress?.({ stage: 'parsing' });
     const { emails, duplicates, columnHint, rawCount } = this.parseUpload(fileBuffer, originalName);
     if (emails.length === 0) throw new AppError(400, 'No email addresses found in the file');
+    const parseMs = Date.now() - t0;
 
     const listId = nanoid();
     this.lists.create({
       id: listId, userId, name: originalName, source: columnHint,
       total: emails.length, duplicates, status: 'pending',
     });
-    this.contacts.insertMany(listId, emails);
 
-    return { listId, total: emails.length, duplicates, rawCount, columnHint };
+    const t1 = Date.now();
+    onProgress?.({ stage: 'saving', total: emails.length });
+    this.contacts.insertMany(listId, emails);
+    const saveMs = Date.now() - t1;
+
+    onProgress?.({ stage: 'done', total: emails.length });
+    return {
+      listId,
+      total: emails.length,
+      duplicates,
+      rawCount,
+      columnHint,
+      timings: { parseMs, saveMs, totalMs: parseMs + saveMs },
+    };
   }
 }
 

@@ -132,11 +132,27 @@ export interface ListDetail {
   delta: number | null;
 }
 
+export interface UploadTimings {
+  parseMs: number;
+  saveMs: number;
+  totalMs: number;
+}
+
+export type UploadStage = 'uploading' | 'parsing' | 'saving' | 'done' | 'error';
+
+export interface UploadProgressEvent {
+  stage: UploadStage;
+  total?: number;
+  error?: string;
+}
+
 export interface UploadResult {
   listId: string;
   total: number;
   duplicates: number;
   columnHint?: string;
+  rawCount?: number;
+  timings?: UploadTimings;
 }
 
 export interface Progress {

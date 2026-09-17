@@ -24,11 +24,21 @@ export function DashboardView() {
   async function handleFile(file: File) {
     setUploadErr('');
     setUpload(null);
-    setUploadMsg(`Uploading & parsing ${file.name}…`);
+    setUploadMsg(`Uploading ${file.name}…`);
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const r = await api.uploadList(fd);
+      const r = await api.uploadList(fd, (evt) => {
+        if (evt.stage === 'uploading') setUploadMsg(`Uploading ${file.name}…`);
+        else if (evt.stage === 'parsing') setUploadMsg(`Parsing ${file.name}…`);
+        else if (evt.stage === 'saving') {
+          setUploadMsg(
+            evt.total
+              ? `Saving ${evt.total.toLocaleString()} contacts…`
+              : 'Saving contacts…',
+          );
+        }
+      });
       setUploadMsg('');
       setUpload(r);
     } catch (e) {
@@ -115,6 +125,12 @@ export function DashboardView() {
                     Parsed <b>{upload.total.toLocaleString()}</b> unique emails ({upload.duplicates} duplicates removed)
                     from <b>{upload.columnHint || 'file'}</b>.
                   </p>
+                  {upload.timings && (
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      Parse {upload.timings.parseMs} ms · Save {upload.timings.saveMs} ms
+                      · Total {upload.timings.totalMs} ms
+                    </p>
+                  )}
                   <button className="btn" onClick={() => startVerification(upload.listId)}>
                     Verify {upload.total.toLocaleString()} emails ({upload.total} credits)
                   </button>

@@ -12,6 +12,7 @@ import type {
   ListSummaryRow,
   ListDetail,
   UploadResult,
+  UploadProgressEvent,
   Progress,
   Alert,
   Webhook,
@@ -100,6 +101,83 @@ async function request<T = unknown>(
   return data as T;
 }
 
+/** Upload with NDJSON stage events: parsing → saving → done. */
+async function uploadListWithProgress(
+  formData: FormData,
+  onProgress?: (evt: UploadProgressEvent) => void,
+): Promise<UploadResult> {
+  const headers: Record<string, string> = {
+    Accept: 'application/x-ndjson',
+  };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  onProgress?.({ stage: 'uploading' });
+
+  let res: Response;
+  try {
+    res = await fetch(API_BASE + '/api/lists/upload?progress=1', {
+      method: 'POST',
+      headers,
+      body: formData,
+      credentials: 'include',
+    });
+  } catch {
+    throw new Error('Network error — could not reach the server. Check your connection.');
+  }
+
+  if (res.status === 401 && onUnauthorized) onUnauthorized();
+  if (res.status === 429) {
+    throw new Error('Too many requests. Please wait a moment and try again.');
+  }
+
+  const ct = res.headers.get('content-type') || '';
+  // Fallback: non-streaming JSON response (older servers / proxies).
+  if (ct.includes('application/json')) {
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.error) || 'Upload failed');
+    onProgress?.({ stage: 'done', total: data.total });
+    return data as UploadResult;
+  }
+
+  if (!res.ok && !ct.includes('ndjson')) {
+    throw new Error('Upload failed (' + res.status + ')');
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Upload failed (no response body)');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: UploadResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      let evt: Record<string, unknown>;
+      try { evt = JSON.parse(line); } catch { continue; }
+      const stage = String(evt.stage || '');
+      if (stage === 'parsing' || stage === 'saving') {
+        onProgress?.({ stage: stage as UploadProgressEvent['stage'], total: evt.total as number | undefined });
+      } else if (stage === 'error') {
+        throw new Error(String(evt.error || 'Upload failed'));
+      } else if (stage === 'done') {
+        const { stage: _s, ...rest } = evt;
+        result = rest as unknown as UploadResult;
+        onProgress?.({ stage: 'done', total: result.total });
+      }
+    }
+  }
+
+  if (!result) throw new Error('Upload failed (incomplete response)');
+  return result;
+}
+
 export const api = {
   health: () => request<{ verification?: VerificationHealth }>('GET', '/health'),
   register: (d: { email: string; password: string; name?: string }) =>
@@ -113,7 +191,10 @@ export const api = {
   verifySingle: (email: string) =>
     request<{ result: VerifyResult; user: User }>('POST', '/verify/single', { email }),
 
-  uploadList: (formData: FormData) => request<UploadResult>('POST', '/lists/upload', formData, true),
+  uploadList: (
+    formData: FormData,
+    onProgress?: (evt: UploadProgressEvent) => void,
+  ) => uploadListWithProgress(formData, onProgress),
   verifyList: (id: string) => request('POST', `/lists/${id}/verify`),
   listProgress: (id: string) => request<Progress>('GET', `/lists/${id}/progress`),
   lists: () => request<{ lists: ListSummaryRow[] }>('GET', '/lists'),

@@ -15,9 +15,58 @@ export function makeListRouter({
   });
 
   // Upload: parse, dedupe, create list (does not verify yet).
+  // With ?progress=1 (or Accept: application/x-ndjson), streams stage events:
+  //   {"stage":"parsing"}\n
+  //   {"stage":"saving","total":N}\n
+  //   {"stage":"done", ...UploadResult}\n
+  // Default remains a single JSON body for API compatibility.
   router.post('/upload', authRequired, upload.single('file'), asyncHandler((req, res) => {
-    const result = uploadList.execute(req.user.id, req.file?.buffer, req.file?.originalname);
-    res.json(result);
+    const wantProgress = req.query.progress === '1'
+      || (req.headers.accept || '').includes('application/x-ndjson');
+
+    if (!wantProgress) {
+      const result = uploadList.execute(req.user.id, req.file?.buffer, req.file?.originalname);
+      return res.json(result);
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    // Disable proxy buffering when present (nginx).
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    const write = (obj) => {
+      res.write(JSON.stringify(obj) + '\n');
+      if (typeof res.flush === 'function') res.flush();
+    };
+
+    try {
+      const result = uploadList.execute(
+        req.user.id,
+        req.file?.buffer,
+        req.file?.originalname,
+        {
+          onProgress: (evt) => {
+            if (evt.stage === 'done') return; // final payload written below
+            write(evt);
+          },
+        },
+      );
+      write({ stage: 'done', ...result });
+      res.end();
+    } catch (e) {
+      // If headers already sent, emit an error event on the stream.
+      if (res.headersSent) {
+        write({
+          stage: 'error',
+          error: e.message || 'Upload failed',
+          status: e.status || 500,
+        });
+        return res.end();
+      }
+      throw e;
+    }
   }));
 
   // Trigger verification of a list.
