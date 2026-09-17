@@ -59,13 +59,13 @@ export function campaignRisk({ stats, preflight, history }) {
   }
   if (catchAll > 0) {
     reasoning.push(inference(
-      `${catchAll} of these are on catch-all domains, whose mailboxes cannot be independently confirmed.`,
+      `${catchAll} recipients are on catch-all domains: mail path is healthy, but individual mailboxes are unconfirmed (a characteristic, not a defect).`,
       CONFIDENCE.MEDIUM
     ));
   }
   if (remove > 0) keyRisks.push(`${remove} recipients are classified Remove (strong evidence they cannot receive mail).`);
   if (unknown > 0) keyRisks.push(`${unknown} recipients are Unknown (unconfirmed, candidates for re-verification, not sending).`);
-  if (catchAll > 0) keyRisks.push(`${catchAll} recipients are on catch-all domains.`);
+  // Catch-all is intentionally NOT listed as a key risk — healthy accepting domain.
   if (disposable > 0) keyRisks.push(`${disposable} recipients use disposable domains.`);
   if (role > 0) keyRisks.push(`${role} recipients are role/shared mailboxes (a characteristic, not a defect).`);
 

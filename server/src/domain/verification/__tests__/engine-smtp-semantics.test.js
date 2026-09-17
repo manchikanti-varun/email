@@ -86,6 +86,8 @@ test('catch-all -> RISKY + review, NOT removed (mailboxStatus ACCEPT_ALL)', asyn
   assert.equal(r.deliverability, DELIVERABILITY.RISKY);
   assert.equal(r.mailboxStatus, 'ACCEPT_ALL');
   assert.equal(r.recommendedAction, ACTION.REVIEW);
+  assert.ok(r.deliverabilityScore >= 70);
+  assert.ok(r.reasons.some((t) => /healthy/i.test(t)));
 });
 
 test('role-based address that is deliverable -> KEEP, role is a characteristic not a penalty', async () => {

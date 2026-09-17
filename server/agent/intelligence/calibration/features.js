@@ -230,7 +230,9 @@ export function evidenceBullets(v) {
   if (f.smtp_connected) out.push({ sign: '+', text: 'SMTP server responded' });
   if (f.smtp_accept) out.push({ sign: '+', text: 'Mailbox independently confirmed' });
   if (f.smtp_reject) out.push({ sign: '+', text: 'Mailbox explicitly rejected (clear signal)' });
-  if (f.catch_all) out.push({ sign: '-', text: 'Catch-all domain: mailbox cannot be independently confirmed' });
+  // Catch-all is informational: supports that SMTP accepted, reduces certainty of
+  // the *individual* mailbox — not a negative "domain is bad" signal.
+  if (f.catch_all) out.push({ sign: '+', text: 'Healthy catch-all domain: mail accepted; specific mailbox unconfirmed' });
   if (f.greylisted) out.push({ sign: '-', text: 'Temporary failure / greylisting observed' });
   if (f.disposable) out.push({ sign: '+', text: 'Disposable domain (clear removal signal)' });
   if (f.has_provider) out.push({ sign: f.provider_agreement < 0 ? '-' : '+', text: f.provider_agreement < 0 ? 'External provider disagrees with local evidence' : 'External provider corroborates evidence' });

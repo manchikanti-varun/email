@@ -126,17 +126,22 @@ export function domainIntelligence({ domainStats, limit = 10 }) {
   const top = domainStats.domains.slice(0, limit).map((d) => {
     const p = d.percentages;
     const problems = [];
+    const notes = [];
     if (p.undeliverable > 0) problems.push(`${p.undeliverable}% undeliverable`);
     if (p.disposable > 0) problems.push(`${p.disposable}% disposable`);
-    if (p.catchAll > 0) problems.push(`${p.catchAll}% catch-all`);
     if (p.unknown > 0) problems.push(`${p.unknown}% unknown`);
+    // Catch-all is a characteristic of healthy accepting domains, not a defect.
+    if (p.catchAll > 0) notes.push(`${p.catchAll}% catch-all (healthy mail path, mailbox unconfirmed)`);
     const summary = problems.length
       ? `${d.domain}: ${d.total} contacts, ${p.deliverable}% deliverable, issues — ${problems.join(', ')}.`
-      : `${d.domain}: ${d.total} contacts, ${p.deliverable}% deliverable, no material issues.`;
+        + (notes.length ? ` Notes — ${notes.join(', ')}.` : '')
+      : notes.length
+        ? `${d.domain}: ${d.total} contacts, healthy catch-all domain — ${notes.join(', ')}.`
+        : `${d.domain}: ${d.total} contacts, ${p.deliverable}% deliverable, no material issues.`;
     let action = 'Keep monitoring.';
     if (p.undeliverable >= 30 || p.disposable >= 20) action = 'Prioritise cleaning: remove undeliverable/disposable contacts on this domain.';
-    else if (p.catchAll >= 40) action = 'Catch-all domain: mailboxes cannot be confirmed; review before large sends.';
     else if (p.unknown >= 30) action = 'Re-verify: many contacts on this domain are unconfirmed.';
+    else if (p.catchAll >= 40) action = 'Healthy catch-all domain: fine to keep known contacts; confirm before large cold sends.';
     return { domain: d.domain, total: d.total, percentages: p, problemScore: d.problemScore, summary, recommendedAction: action };
   });
   return { available: true, domainCount: domainStats.domainCount, domains: top };

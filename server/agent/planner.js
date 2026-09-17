@@ -280,7 +280,7 @@ export class Planner {
   _domainAnswer(r) {
     if (!r || r.available === false || !r.domains?.length) return r?.message || 'No domain-level problems stand out, or the list isn\'t verified yet.';
     const top = r.domains.slice(0, 5).map((d, i) => `${i + 1}. ${d.summary}`).join('\n');
-    return `Top problem domains (of ${r.domainCount}):\n${top}\n\nRecommendation: ${r.domains[0].recommendedAction}`;
+    return `Domains to watch (of ${r.domainCount}):\n${top}\n\nRecommendation: ${r.domains[0].recommendedAction}`;
   }
 
   _predictionAnswer(r) {

@@ -251,9 +251,13 @@ export class VerificationEngine {
       ev.push(evidence('pass', 'SMTP server responds'));
       if (smtp.catchAll) {
         catchAll = true;
-        ev.push(evidence('warn', 'Catch-all domain'));
-        risks.push(risk('catch_all', 'Catch-all domain',
-          'The server accepts mail for any address, so this specific mailbox cannot be independently confirmed.'));
+        // Informational, not a failure: domain mail path is healthy; mailbox
+        // identity alone is unconfirmed.
+        ev.push(evidence('info', 'Catch-all domain (mail path healthy)'));
+        risks.push(risk('catch_all', 'Catch-all · unconfirmed mailbox',
+          'The domain\'s mail servers are healthy and accept mail, including for ' +
+          'addresses that may not exist. This specific mailbox is plausible but ' +
+          'cannot be independently confirmed — not a sign the address is bad.'));
       } else if (smtp.mailboxExists) {
         ev.push(evidence('pass', 'Mailbox confirmed to exist'));
       } else if (smtp.mailboxRejected) {
@@ -369,7 +373,9 @@ function assessConfidence(f) {
 function scoreDeliverability(f, deliverability) {
   if (deliverability === DELIVERABILITY.UNDELIVERABLE) return 5;
   if (deliverability === DELIVERABILITY.DELIVERABLE) return 100;
-  if (deliverability === DELIVERABILITY.RISKY) return 55;
+  // Catch-all: healthy mail infrastructure, unconfirmed mailbox — score reflects
+  // that positively without claiming a proven individual inbox.
+  if (deliverability === DELIVERABILITY.RISKY) return 78;
 
   let score = 50;
   if (f.hasMx) score += 20;
@@ -436,8 +442,9 @@ function buildSmtpEvidence(smtp, { finalReason }) {
 function buildReasons({ reasons, deliverability, confidence, facts, mailboxStatus }) {
   if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || (deliverability === DELIVERABILITY.RISKY && facts.catchAll)) {
     reasons.push(
-      'The domain is catch-all: it accepts mail for any address, so this specific ' +
-      'mailbox cannot be independently confirmed. The address may well be valid.'
+      'Mail infrastructure looks healthy (DNS, MX, SMTP all respond). The domain ' +
+      'is catch-all, so any address is accepted at SMTP time — this mailbox is ' +
+      'plausible and not marked invalid, but it cannot be independently confirmed.'
     );
   } else if (deliverability === DELIVERABILITY.DELIVERABLE) {
     reasons.push('The mailbox was directly confirmed to exist and can receive mail.');
@@ -484,8 +491,8 @@ function recommendationText({ recommendedAction, facts, mailboxStatus }) {
     case ACTION.REVIEW:
     default:
       return mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll
-        ? 'REVIEW — catch-all domain; the mailbox cannot be independently confirmed. ' +
-          'Safe to keep for low-volume/known contacts; verify before large campaigns.'
+        ? 'REVIEW — healthy catch-all domain; keep for known/low-volume contacts. ' +
+          'Mailbox is unconfirmed (not undeliverable); confirm before large cold campaigns.'
         : 'REVIEW — evidence is mixed; a human decision is recommended.';
   }
 }

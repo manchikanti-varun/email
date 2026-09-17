@@ -302,7 +302,7 @@ function PreflightCard({ id }: { id: string }) {
             <div>
               {bar('Safe', p.buckets.safe, 'var(--safe)')}
               {bar('Review', p.buckets.review, 'var(--review)')}
-              {bar('Catch-all', p.buckets.catchAll, 'var(--catchall)')}
+              {bar('Catch-all (healthy)', p.buckets.catchAll, 'var(--brand)')}
               {bar('Invalid', p.buckets.invalid, 'var(--remove)')}
               {bar('Disposable', p.buckets.disposable, 'var(--remove)')}
               {bar('Unknown', p.buckets.unknown, 'var(--unknown)')}
@@ -417,13 +417,13 @@ function AiInsightsCard({ id }: { id: string }) {
 
             {/* Domains */}
             <div>
-              <div className="stat-label">Top problem domains</div>
+              <div className="stat-label">Domains to watch</div>
               {domains && domains.available && domains.domains.length ? (
                 domains.domains.slice(0, 4).map((d, i) => (
                   <div
                     key={i}
                     className="signal"
-                    title={d.recommendedAction}
+                    title={d.summary || d.recommendedAction}
                   >
                     <span
                       className="dot"
@@ -433,7 +433,7 @@ function AiInsightsCard({ id }: { id: string }) {
                   </div>
                 ))
               ) : (
-                <p className="muted">No standout problem domains.</p>
+                <p className="muted">No standout domains.</p>
               )}
             </div>
 

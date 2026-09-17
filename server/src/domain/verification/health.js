@@ -27,16 +27,21 @@ export function summarize(contacts) {
 
   const pct = (n) => (total ? Math.round((n / total) * 1000) / 10 : 0);
 
+  // Catch-all contacts sit in "review" but are healthy mail paths — give them
+  // strong partial credit (not the same as proven Safe, not a health failure).
   const deliverability = total
-    ? Math.round(((counts.safe + counts.review * 0.5) / total) * 100)
+    ? Math.round(((counts.safe + counts.review * 0.85) / total) * 100)
     : 0;
   // Data quality = share of addresses that are NOT undeliverable. Being
-  // role-based does NOT reduce data quality — it is a characteristic.
+  // role-based / catch-all does NOT reduce data quality — those are characteristics.
   const dataQuality = total
     ? Math.round(((total - counts.remove) / total) * 100)
     : 0;
+  // "Risk health": only real defects (and unknowns) weigh. Catch-all review is
+  // not counted as a risk defect (same philosophy as role-based).
+  const reviewAsRisk = Math.max(0, counts.review - catchAll);
   const risk = total
-    ? Math.round(((total - counts.review - counts.unknown) / total) * 100)
+    ? Math.round(((total - reviewAsRisk - counts.unknown) / total) * 100)
     : 0;
   const domainHealth = total
     ? Math.round(((total - noMx - disposable) / total) * 100)

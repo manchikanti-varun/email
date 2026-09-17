@@ -79,7 +79,7 @@ test('extractFeatures: CONFLICTING SIGNALS — never fabricated, encoded as give
 test('evidenceBullets: returns signed, human-readable evidence', () => {
   const bullets = evidenceBullets(catchAllResult());
   assert.ok(Array.isArray(bullets) && bullets.length > 0);
-  assert.ok(bullets.some((b) => /catch-all/i.test(b.text) && b.sign === '-'));
+  assert.ok(bullets.some((b) => /catch-all/i.test(b.text) && b.sign === '+'));
 });
 
 // ---------------------------------------------------------------------------

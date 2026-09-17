@@ -17,7 +17,8 @@
   --review: #f5c451;
   --remove: #f2606d;
   --unknown: #8592ab;
-  --catchall: #f2954b;
+  /* Informational accent (catch-all / reverify) — not a "danger" orange. */
+  --catchall: #7aa5ff;
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 10px 40px rgba(0,0,0,.45);

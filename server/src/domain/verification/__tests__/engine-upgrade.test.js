@@ -146,6 +146,8 @@ test('4) Real + random address both 250 → ACCEPT_ALL (not DELIVERABLE)', async
   assert.notEqual(r.deliverability, DELIVERABILITY.DELIVERABLE);
   assert.equal(r.recommendedAction, ACTION.REVIEW);
   assert.equal(r.verificationQuality, VERIFICATION_QUALITY.MEDIUM);
+  assert.ok(r.deliverabilityScore >= 70, 'catch-all should score as healthy-unconfirmed, not a low penalty');
+  assert.ok(r.evidence.some((e) => e.status === 'info' && /catch-all/i.test(e.label)));
   assert.ok(r.smtpEvidence?.catchAll === true || r.riskSignals.some((s) => s.code === 'catch_all'));
 });
 

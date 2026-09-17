@@ -32,7 +32,8 @@ export const ACTION_STYLE: Record<string, { label: string; color: string }> = {
 
 export const DELIV_STYLE: Record<string, { label: string; color: string }> = {
   deliverable: { label: 'Deliverable', color: 'var(--safe)' },
-  risky: { label: 'Catch-all', color: 'var(--catchall)' },
+  // Catch-all is healthy mail + unconfirmed mailbox — informational, not a defect.
+  risky: { label: 'Catch-all · unconfirmed', color: 'var(--brand)' },
   unknown: { label: 'Unconfirmed', color: 'var(--unknown)' },
   undeliverable: { label: 'Undeliverable', color: 'var(--remove)' },
 };

@@ -104,10 +104,11 @@ export function domainStatistics(contactsRaw, { minContacts = 1 } = {}) {
       const riskyPct = pct(e.risky, e.total);
       const undeliverablePct = pct(e.undeliverable, e.total);
       const disposablePct = pct(e.disposable, e.total);
-      // Problem score: undeliverable + disposable weigh most; unknown/risky
-      // moderate. Weighted by contact volume so big domains matter more.
+      // Problem score: undeliverable + disposable weigh most; unknown moderate.
+      // Catch-all ("risky") is healthy mail + unconfirmed mailbox — barely a
+      // "problem", so it must not push institutional domains to the top.
       const problemRate = round1(
-        undeliverablePct * 1.0 + disposablePct * 1.0 + riskyPct * 0.5 + unknownPct * 0.5
+        undeliverablePct * 1.0 + disposablePct * 1.0 + unknownPct * 0.5 + riskyPct * 0.05
       );
       const problemScore = round1((problemRate / 100) * Math.log10(e.total + 1) * 100);
       return {
