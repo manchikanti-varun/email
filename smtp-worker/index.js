@@ -67,18 +67,28 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
   const email = String(req.body.email).toLowerCase();
   const domain = email.split('@')[1];
 
-  // Resolve MX if the caller didn't supply one (the main app usually does, to
-  // avoid duplicate DNS work — but we support both).
-  let mxHost = req.body.mxHost;
-  if (!mxHost) {
+  // Resolve MX list if the caller didn't supply hosts (the main app usually
+  // does, to avoid duplicate DNS work — but we support both). Prefer an
+  // explicit mxHosts[] so we can fall back when the primary MX is unreachable.
+  const MAX_MX_ATTEMPTS = 3;
+  let mxHosts = [];
+  if (Array.isArray(req.body.mxHosts) && req.body.mxHosts.length) {
+    mxHosts = req.body.mxHosts.map(String);
+  } else if (req.body.mxHost) {
+    mxHosts = [String(req.body.mxHost)];
+  } else {
     try {
       const mx = await dns.resolveMx(domain);
-      const sorted = (mx || []).filter((r) => r.exchange).sort((a, b) => a.priority - b.priority);
-      mxHost = sorted[0]?.exchange || domain;
+      mxHosts = (mx || [])
+        .filter((r) => r.exchange)
+        .sort((a, b) => a.priority - b.priority)
+        .map((r) => r.exchange);
     } catch {
-      mxHost = domain; // implicit MX
+      mxHosts = [];
     }
+    if (!mxHosts.length) mxHosts = [domain]; // implicit MX
   }
+  mxHosts = [...new Set(mxHosts.filter(Boolean))].slice(0, MAX_MX_ATTEMPTS);
 
   metrics.incActive();
   await acquire();
@@ -88,27 +98,42 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
     const probeAddr = knownCatchAll === null ? catchAllAddress(email) : null;
     const recipients = probeAddr ? [email, probeAddr] : [email];
 
-    const { result: conv, attempts } = await withRetry(
-      () => smtpConversation(mxHost, {
-        from: config.mailFrom, ehlo: config.ehloName,
-        recipients, timeoutMs: config.connectTimeoutMs,
-        port: config.mxPort,
-      }),
-      { maxRetries: config.maxRetries, shouldRetry: transportErrorRetryable },
-    );
+    const triedHosts = [];
+    let conv = null;
+    let attempts = 0;
+    let mxHost = mxHosts[0];
+
+    // Transport-only fallback across MX hosts. A connected primary that
+    // greylists/rejects is authoritative — do not hop for a different answer.
+    for (const host of mxHosts) {
+      mxHost = host;
+      triedHosts.push(host);
+      const run = await withRetry(
+        () => smtpConversation(host, {
+          from: config.mailFrom, ehlo: config.ehloName,
+          recipients, timeoutMs: config.connectTimeoutMs,
+          port: config.mxPort,
+        }),
+        { maxRetries: config.maxRetries, shouldRetry: transportErrorRetryable },
+      );
+      conv = run.result;
+      attempts += run.attempts;
+      if (conv.connected && !isTransportFailure(conv.error)) break;
+    }
 
     // Transport failure => evidence about the connection, NOT the mailbox.
-    if (!conv.connected || isTransportFailure(conv.error)) {
+    if (!conv || !conv.connected || isTransportFailure(conv.error)) {
       const evidence = {
         status: 'unknown',
         code: null,
         response: null,
         mxHost,
-        responseTimeMs: conv.responseTimeMs,
-        error: conv.error || 'connection-failed',
+        triedHosts,
+        responseTimeMs: conv?.responseTimeMs || 0,
+        error: conv?.error || 'connection-failed',
         attempts,
       };
-      metrics.record({ ...evidence, connected: conv.connected });
+      metrics.record({ ...evidence, connected: !!conv?.connected });
       return res.json({
         email,
         smtp: evidence,
@@ -137,6 +162,7 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
       code: target.code ?? null,
       response: (target.message || '').slice(0, 200) || null,
       mxHost,
+      triedHosts,
       responseTimeMs: conv.responseTimeMs,
       attempts,
     };

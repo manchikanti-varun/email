@@ -29,11 +29,13 @@ export class RemoteSmtpProbe extends SmtpProbe {
 
   async check(email, mxHosts) {
     if (!this.configured) return { reachable: false, error: 'worker-not-configured', inconclusive: true, source: 'none' };
-    const mxHost = (mxHosts && mxHosts[0]) || undefined;
+    const hosts = Array.isArray(mxHosts) ? mxHosts.filter(Boolean) : [];
+    const mxHost = hosts[0] || undefined;
+    const mxHostList = hosts.length ? hosts : undefined;
 
     let data;
     try {
-      data = await this._call({ email, mxHost });
+      data = await this._call({ email, mxHost, mxHosts: mxHostList });
     } catch (e) {
       // Worker unreachable / timeout / error => inconclusive, never invalid.
       return { reachable: false, error: e.message || 'worker-error', inconclusive: true, source: 'none' };
@@ -44,7 +46,14 @@ export class RemoteSmtpProbe extends SmtpProbe {
 
     // Transport-level failure reported by the worker.
     if (status === 'unknown' || smtp.error) {
-      return { reachable: false, error: smtp.error || 'inconclusive', inconclusive: true, source: 'smtp-worker' };
+      return {
+        reachable: false,
+        error: smtp.error || 'inconclusive',
+        inconclusive: true,
+        source: 'smtp-worker',
+        mxUnreachable: true,
+        triedHosts: smtp.triedHosts || hosts,
+      };
     }
 
     return {
@@ -58,11 +67,12 @@ export class RemoteSmtpProbe extends SmtpProbe {
       source: 'smtp-worker',
       responseTimeMs: smtp.responseTimeMs,
       mxHost: smtp.mxHost,
+      triedHosts: smtp.triedHosts,
       workerId: data.worker?.id,
     };
   }
 
-  async _call({ email, mxHost }) {
+  async _call({ email, mxHost, mxHosts }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.cfg.timeoutMs || 12000);
     const retries = Math.max(0, this.cfg.maxRetries ?? 1);
@@ -70,6 +80,9 @@ export class RemoteSmtpProbe extends SmtpProbe {
     try {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
+          const body = { email };
+          if (mxHosts && mxHosts.length) body.mxHosts = mxHosts;
+          else if (mxHost) body.mxHost = mxHost;
           const res = await this.fetch(this.cfg.url.replace(/\/$/, '') + '/internal/verify', {
             method: 'POST',
             signal: controller.signal,
@@ -77,7 +90,7 @@ export class RemoteSmtpProbe extends SmtpProbe {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${this.cfg.secret}`,
             },
-            body: JSON.stringify({ email, mxHost }),
+            body: JSON.stringify(body),
           });
           if (!res.ok) throw new Error(`worker_http_${res.status}`);
           return await res.json();

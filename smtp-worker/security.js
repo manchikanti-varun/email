@@ -36,6 +36,20 @@ export function validateVerifyBody(body) {
   if (body.mxHost !== undefined && body.mxHost !== null && !HOST_RE.test(String(body.mxHost))) {
     errors.push('mxHost must be a hostname');
   }
+  if (body.mxHosts !== undefined && body.mxHosts !== null) {
+    if (!Array.isArray(body.mxHosts)) {
+      errors.push('mxHosts must be an array of hostnames');
+    } else if (body.mxHosts.length > 5) {
+      errors.push('mxHosts supports at most 5 hosts');
+    } else {
+      for (const h of body.mxHosts) {
+        if (!HOST_RE.test(String(h || ''))) {
+          errors.push('mxHosts entries must be hostnames');
+          break;
+        }
+      }
+    }
+  }
   return { valid: errors.length === 0, errors };
 }
 

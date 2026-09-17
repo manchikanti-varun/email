@@ -195,14 +195,25 @@ export class VerificationEngine {
     let smtpProbed = false;
     let smtpUnavailable = false;
 
+    // mxUnreachable = we attempted SMTP but no MX completed a handshake.
+    // Distinct from "port 25 blocked here" so the UI does not blame our network
+    // when only this domain's mail servers were unreachable.
+    let mxUnreachable = false;
+
     if (smtp.skipped) {
       smtpUnavailable = true;
       ev.push(evidence('info', 'SMTP probe not performed (disabled here)'));
     } else if (smtp.inconclusive) {
       smtpUnavailable = true;
-      ev.push(evidence('info', 'SMTP could not be probed (outbound port 25 unavailable)'));
+      mxUnreachable = !!(smtp.mxUnreachable || smtp.triedHosts?.length);
+      if (mxUnreachable) {
+        ev.push(evidence('info', 'Mail servers did not complete an SMTP handshake'));
+      } else {
+        ev.push(evidence('info', 'SMTP could not be probed (outbound port 25 unavailable)'));
+      }
     } else if (smtp.reachable === false) {
       smtpUnavailable = true;
+      mxUnreachable = true;
       ev.push(evidence('info', 'Mail server did not complete an SMTP handshake'));
     } else if (smtp.reachable) {
       smtpProbed = true;
@@ -255,6 +266,7 @@ export class VerificationEngine {
       catchAll,
       greylisted,
       smtpUnavailable,
+      mxUnreachable,
       hasMx: dnsResult.hasMx,
       aOnly: dnsResult.aRecord && !dnsResult.hasMx,
       role,
@@ -333,7 +345,13 @@ function buildReasons({ reasons, deliverability, confidence, facts }) {
       'mailbox cannot be independently confirmed. The address may well be valid.'
     );
   } else if (deliverability === DELIVERABILITY.UNKNOWN) {
-    if (facts.smtpUnavailable) {
+    if (facts.mxUnreachable) {
+      reasons.push(
+        'Syntax, domain and MX records are healthy, but none of the domain\'s mail ' +
+        'servers completed an SMTP handshake from this verifier. The mailbox is ' +
+        'unconfirmed, not undeliverable.'
+      );
+    } else if (facts.smtpUnavailable) {
       reasons.push(
         'Syntax, domain and MX records are healthy, but mailbox existence could not ' +
         'be directly confirmed because SMTP probing was unavailable. This is unconfirmed, ' +

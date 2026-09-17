@@ -121,11 +121,19 @@ function probe(host, from, recipients, timeoutMs) {
 // still runs for every address).
 const CATCHALL_TTL_MS = 10 * 60 * 1000;
 
+// Prefer the primary MX, but fall back when it is unreachable. Caps keep bulk
+// verification from walking long MX lists (each miss costs a full timeout).
+export const MAX_MX_ATTEMPTS = 3;
+
 export class SocketSmtpProbe extends SmtpProbe {
-  /** @param {{enabled:boolean, from:string, timeoutMs:number}} smtpConfig */
+  /**
+   * @param {{enabled:boolean, from:string, timeoutMs:number, probeFn?: Function}} smtpConfig
+   * `probeFn` is injectable for unit tests; production uses the socket probe.
+   */
   constructor(smtpConfig) {
     super();
     this.cfg = smtpConfig;
+    this._probe = smtpConfig.probeFn || probe;
     this._catchAll = new Map(); // domain -> { at, isCatchAll }
   }
 
@@ -142,7 +150,6 @@ export class SocketSmtpProbe extends SmtpProbe {
     if (!this.cfg.enabled) return { skipped: true, reachable: null };
     if (!mxHosts || mxHosts.length === 0) return { reachable: false, error: 'no-mx' };
 
-    const host = mxHosts[0];
     const from = this.cfg.from;
     const domain = email.split('@')[1];
 
@@ -156,36 +163,57 @@ export class SocketSmtpProbe extends SmtpProbe {
     const catchAllProbe = knownCatchAll === null ? randomLocalPart() + '@' + domain : null;
     const recipients = catchAllProbe ? [email, catchAllProbe] : [email];
 
-    const res = await probe(host, from, recipients, this.cfg.timeoutMs);
+    // Walk MX hosts in DNS priority order. Only fall back on TRANSPORT failure
+    // (no TCP/SMTP greeting). A connected primary that greylists or rejects is
+    // authoritative — do not hop to a secondary MX for a different answer.
+    const hosts = [...new Set(mxHosts.filter(Boolean))].slice(0, MAX_MX_ATTEMPTS);
+    const triedHosts = [];
+    let lastError = 'connection-failed';
 
-    if (!res.connected) {
-      // Never strong enough evidence to mark undeliverable — usually our own
-      // network (outbound port 25 blocked). Treat as inconclusive.
-      return { reachable: false, error: res.error || 'connection-failed', inconclusive: true };
+    for (const host of hosts) {
+      triedHosts.push(host);
+      const res = await this._probe(host, from, recipients, this.cfg.timeoutMs);
+
+      if (!res.connected) {
+        lastError = res.error || 'connection-failed';
+        continue;
+      }
+
+      const mailboxCode = res.rcpt[email];
+      let isCatchAll;
+      let probeCode;
+      if (catchAllProbe) {
+        probeCode = res.rcpt[catchAllProbe];
+        isCatchAll = accepts(probeCode);
+        // Only cache a confident (accept/reject) result, not a transient temp/no-reply.
+        if (accepts(probeCode) || rejects(probeCode)) this._setCatchAll(domain, isCatchAll);
+      } else {
+        isCatchAll = knownCatchAll;
+        probeCode = undefined;
+      }
+
+      return {
+        reachable: true,
+        mailboxExists: accepts(mailboxCode),
+        mailboxRejected: rejects(mailboxCode),
+        temporaryFailure: temp(mailboxCode) || (probeCode !== undefined && temp(probeCode)),
+        catchAll: isCatchAll,
+        code: mailboxCode,
+        probeCode,
+        greylisted: temp(mailboxCode),
+        mxHost: host,
+        triedHosts,
+      };
     }
 
-    const mailboxCode = res.rcpt[email];
-    let isCatchAll;
-    let probeCode;
-    if (catchAllProbe) {
-      probeCode = res.rcpt[catchAllProbe];
-      isCatchAll = accepts(probeCode);
-      // Only cache a confident (accept/reject) result, not a transient temp/no-reply.
-      if (accepts(probeCode) || rejects(probeCode)) this._setCatchAll(domain, isCatchAll);
-    } else {
-      isCatchAll = knownCatchAll;
-      probeCode = undefined;
-    }
-
+    // Never strong enough evidence to mark undeliverable — primary (and any
+    // tried backups) did not complete a handshake. Treat as inconclusive.
     return {
-      reachable: true,
-      mailboxExists: accepts(mailboxCode),
-      mailboxRejected: rejects(mailboxCode),
-      temporaryFailure: temp(mailboxCode) || (probeCode !== undefined && temp(probeCode)),
-      catchAll: isCatchAll,
-      code: mailboxCode,
-      probeCode,
-      greylisted: temp(mailboxCode),
+      reachable: false,
+      error: lastError,
+      inconclusive: true,
+      triedHosts,
+      mxUnreachable: true,
     };
   }
 
@@ -194,7 +222,7 @@ export class SocketSmtpProbe extends SmtpProbe {
       return { available: false, reason: 'disabled', detail: 'SMTP_ENABLED is false' };
     }
     const host = 'gmail-smtp-in.l.google.com';
-    const res = await probe(host, this.cfg.from, [], Math.min(this.cfg.timeoutMs, 6000));
+    const res = await this._probe(host, this.cfg.from, [], Math.min(this.cfg.timeoutMs, 6000));
     if (res.connected) {
       return { available: true, reason: 'ok', detail: `connected to ${host}:25` };
     }

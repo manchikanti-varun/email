@@ -40,6 +40,31 @@ test('worker timeout (inconclusive) -> UNKNOWN, never a negative verdict', async
   assert.ok(r.deliverabilityScore > 5, 'score must not collapse to the undeliverable floor');
 });
 
+test('MX unreachable (tried hosts) -> UNKNOWN with handshake evidence, not port-25 blame', async () => {
+  const smtp = {
+    check: async () => ({
+      reachable: false,
+      error: 'timeout',
+      inconclusive: true,
+      mxUnreachable: true,
+      triedHosts: ['nsmtp.example.com', 'aspmx.l.google.com'],
+      source: 'local-smtp',
+    }),
+  };
+  const r = await engineWith({ smtp }).verify('cmo@example.com');
+  assert.equal(r.deliverability, DELIVERABILITY.UNKNOWN);
+  assert.equal(r.recommendedAction, ACTION.REVERIFY);
+  assert.ok(
+    r.evidence.some((e) => /handshake/i.test(e.label)),
+    'should report MX handshake failure',
+  );
+  assert.ok(
+    !r.evidence.some((e) => /port 25 unavailable/i.test(e.label)),
+    'must not blame outbound port 25 when MX hosts were tried',
+  );
+  assert.ok(r.reasons.some((t) => /mail servers completed an SMTP handshake/i.test(t)));
+});
+
 test('worker confirms mailbox (accepted) -> DELIVERABLE, source recorded', async () => {
   const smtp = { check: async () => ({ reachable: true, mailboxExists: true, source: 'smtp-worker' }) };
   const r = await engineWith({ smtp }).verify('john@example.com');

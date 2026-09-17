@@ -43,7 +43,23 @@ test('worker status unknown -> inconclusive, NEVER a verdict', async () => {
   const p = new RemoteSmtpProbe({ ...base, fetchImpl: fakeFetch({ smtp: { status: 'unknown', error: 'timeout' } }) });
   const r = await p.check('a@x.com', ['mx']);
   assert.equal(r.inconclusive, true);
+  assert.equal(r.mxUnreachable, true);
   assert.notEqual(r.mailboxRejected, true);
+});
+
+test('sends full mxHosts list to the worker', async () => {
+  let body;
+  const fetchImpl = async (_url, opts) => {
+    body = JSON.parse(opts.body);
+    return {
+      ok: true,
+      json: async () => ({ smtp: { status: 'accepted', code: 250, mxHost: 'mx2.example.com' }, catchAll: false }),
+    };
+  };
+  const p = new RemoteSmtpProbe({ ...base, fetchImpl });
+  await p.check('a@x.com', ['mx1.example.com', 'mx2.example.com']);
+  assert.deepEqual(body.mxHosts, ['mx1.example.com', 'mx2.example.com']);
+  assert.equal(body.mxHost, undefined);
 });
 
 test('network failure -> inconclusive, NEVER a verdict', async () => {
