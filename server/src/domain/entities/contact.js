@@ -17,6 +17,8 @@ export function toDomainContact(row) {
     mailboxStatus: row.mailbox_status ?? null,
     verificationQuality: row.verification_quality ?? null,
     smtpEvidence: safeParseObject(row.smtp_evidence),
+    acceptanceType: row.acceptance_type
+      || ((row.status === 'accepted' || row.deliverability === 'accepted') ? 'CATCH_ALL' : null),
   };
 }
 

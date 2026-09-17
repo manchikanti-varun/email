@@ -148,6 +148,7 @@ ensureColumn('contacts', 'calibration_model', 'calibration_model TEXT');
 ensureColumn('contacts', 'mailbox_status', 'mailbox_status TEXT');
 ensureColumn('contacts', 'verification_quality', 'verification_quality TEXT');
 ensureColumn('contacts', 'smtp_evidence', 'smtp_evidence TEXT');
+ensureColumn('contacts', 'acceptance_type', 'acceptance_type TEXT');
 ensureColumn('users', 'api_key_hash', 'api_key_hash TEXT');
 ensureColumn('users', 'api_key_prefix', 'api_key_prefix TEXT');
 

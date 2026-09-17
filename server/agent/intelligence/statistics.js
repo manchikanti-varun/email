@@ -24,7 +24,7 @@ export function listStatistics(contactsRaw) {
   const total = contacts.length;
 
   const classification = { safe: 0, review: 0, remove: 0, unknown: 0 };
-  const deliverability = { deliverable: 0, undeliverable: 0, risky: 0, unknown: 0 };
+  const deliverability = { deliverable: 0, accepted: 0, undeliverable: 0, risky: 0, unknown: 0 };
   const confidence = { high: 0, medium: 0, low: 0, unknown: 0 };
   const risk = { disposable: 0, role_based: 0, catch_all: 0, no_mx: 0, possible_typo: 0, temporary_failure: 0 };
   const smtpSource = { 'local-smtp': 0, 'smtp-worker': 0, none: 0, unrecorded: 0 };
@@ -62,6 +62,7 @@ export function listStatistics(contactsRaw) {
       remove: pct(classification.remove, total),
       unknown: pct(classification.unknown, total),
       deliverable: pct(deliverability.deliverable, total),
+      accepted: pct(deliverability.accepted, total),
       risky: pct(deliverability.risky, total),
       undeliverable: pct(deliverability.undeliverable, total),
       catchAll: pct(risk.catch_all, total),
@@ -83,7 +84,7 @@ export function domainStatistics(contactsRaw, { minContacts = 1 } = {}) {
     if (!map.has(d)) {
       map.set(d, {
         domain: d, total: 0,
-        deliverable: 0, undeliverable: 0, risky: 0, unknown: 0,
+        deliverable: 0, accepted: 0, undeliverable: 0, risky: 0, unknown: 0,
         catchAll: 0, disposable: 0, role: 0, noMx: 0,
       });
     }
@@ -100,21 +101,20 @@ export function domainStatistics(contactsRaw, { minContacts = 1 } = {}) {
     .filter((e) => e.total >= minContacts)
     .map((e) => {
       const deliverablePct = pct(e.deliverable, e.total);
+      const acceptedPct = pct(e.accepted, e.total);
       const unknownPct = pct(e.unknown, e.total);
       const riskyPct = pct(e.risky, e.total);
       const undeliverablePct = pct(e.undeliverable, e.total);
       const disposablePct = pct(e.disposable, e.total);
-      // Problem score: undeliverable + disposable weigh most; unknown moderate.
-      // Catch-all ("risky") is healthy mail + unconfirmed mailbox — barely a
-      // "problem", so it must not push institutional domains to the top.
+      // Problem score: only real negatives. Catch-all/accepted/unknown are not problems.
       const problemRate = round1(
-        undeliverablePct * 1.0 + disposablePct * 1.0 + unknownPct * 0.5 + riskyPct * 0.05
+        undeliverablePct * 1.0 + disposablePct * 1.0 + riskyPct * 0.4 + unknownPct * 0.05
       );
       const problemScore = round1((problemRate / 100) * Math.log10(e.total + 1) * 100);
       return {
         ...e,
         percentages: {
-          deliverable: deliverablePct, unknown: unknownPct, risky: riskyPct,
+          deliverable: deliverablePct, accepted: acceptedPct, unknown: unknownPct, risky: riskyPct,
           undeliverable: undeliverablePct, disposable: disposablePct,
           role: pct(e.role, e.total), catchAll: pct(e.catchAll, e.total),
         },

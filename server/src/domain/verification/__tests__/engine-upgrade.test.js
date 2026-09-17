@@ -142,11 +142,12 @@ test('4) Real + random address both 250 → ACCEPT_ALL (not DELIVERABLE)', async
 
   const r = await engineWith({ smtp: probe }).verify('anyone@example.com');
   assert.equal(r.mailboxStatus, MAILBOX_STATUS.ACCEPT_ALL);
-  assert.equal(r.deliverability, DELIVERABILITY.RISKY); // backward-compatible
+  assert.equal(r.deliverability, DELIVERABILITY.ACCEPTED);
   assert.notEqual(r.deliverability, DELIVERABILITY.DELIVERABLE);
-  assert.equal(r.recommendedAction, ACTION.REVIEW);
+  assert.equal(r.recommendedAction, ACTION.KEEP);
+  assert.equal(r.classification, 'safe');
   assert.equal(r.verificationQuality, VERIFICATION_QUALITY.MEDIUM);
-  assert.ok(r.deliverabilityScore >= 70, 'catch-all should score as healthy-unconfirmed, not a low penalty');
+  assert.equal(r.deliverabilityScore, 100, 'catch-all must not penalize score');
   assert.ok(r.evidence.some((e) => e.status === 'info' && /catch-all/i.test(e.label)));
   assert.ok(r.smtpEvidence?.catchAll === true || r.riskSignals.some((s) => s.code === 'catch_all'));
 });

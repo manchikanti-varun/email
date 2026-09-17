@@ -7,10 +7,11 @@
 //   Evidence  →  Confidence  →  Classification  →  Explanation  →  Action
 //
 // Dimensions returned per address:
-//   deliverability   : 'deliverable' | 'undeliverable' | 'risky' | 'unknown'
-//   deliverabilityScore : 0-100 technical score (NOT penalised for being role-based)
+//   deliverability   : 'deliverable' | 'accepted' | 'undeliverable' | 'risky' | 'unknown'
+//   deliverabilityScore : 0-100 — only reduced by actual negative evidence
 //   confidence       : 'high' | 'medium' | 'low' | 'unknown'
 //   mailboxStatus    : 'DELIVERABLE' | 'UNDELIVERABLE' | 'ACCEPT_ALL' | 'UNKNOWN'
+//   acceptanceType   : 'CATCH_ALL' | null  (set when status is accepted via catch-all)
 //   verificationQuality : 'HIGH' | 'MEDIUM' | 'LOW'
 //   riskSignals      : [ { code, label, detail } ]  descriptive characteristics
 //   recommendedAction: 'keep' | 'review' | 'remove' | 'reverify'
@@ -19,6 +20,9 @@
 //   reasons          : plain-language explanation
 //   recommendation   : what the sender should do and why
 //
+// Catch-all is POSITIVE mail-infrastructure evidence (server accepts the
+// recipient). It is NEVER a REVIEW/health penalty — only a note that the
+// exact mailbox cannot be independently proven.
 // Lack of evidence is NEVER converted into negative evidence.
 //
 // This is pure domain logic: network access arrives through injected ports
@@ -37,9 +41,15 @@ function risk(code, label, detail) { return { code, label, detail }; }
 
 export const DELIVERABILITY = {
   DELIVERABLE: 'deliverable',
+  ACCEPTED: 'accepted', // catch-all / positive accept without proven mailbox
   UNDELIVERABLE: 'undeliverable',
   RISKY: 'risky',
   UNKNOWN: 'unknown',
+};
+
+/** Additive type tag when deliverability is accepted via catch-all. */
+export const ACCEPTANCE_TYPE = {
+  CATCH_ALL: 'CATCH_ALL',
 };
 export const CONFIDENCE = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low', UNKNOWN: 'unknown' };
 export const ACTION = { KEEP: 'keep', REVIEW: 'review', REMOVE: 'remove', REVERIFY: 'reverify' };
@@ -254,10 +264,9 @@ export class VerificationEngine {
         // Informational, not a failure: domain mail path is healthy; mailbox
         // identity alone is unconfirmed.
         ev.push(evidence('info', 'Catch-all domain (mail path healthy)'));
-        risks.push(risk('catch_all', 'Catch-all · unconfirmed mailbox',
-          'The domain\'s mail servers are healthy and accept mail, including for ' +
-          'addresses that may not exist. This specific mailbox is plausible but ' +
-          'cannot be independently confirmed — not a sign the address is bad.'));
+        risks.push(risk('catch_all', 'Catch-all · accepted',
+          'Accepted by a catch-all mail server. Individual mailbox existence cannot ' +
+          'be independently confirmed.'));
       } else if (smtp.mailboxExists) {
         ev.push(evidence('pass', 'Mailbox confirmed to exist'));
       } else if (smtp.mailboxRejected) {
@@ -336,6 +345,7 @@ export class VerificationEngine {
       confidence,
       mailboxStatus,
       verificationQuality,
+      acceptanceType: facts.catchAll ? ACCEPTANCE_TYPE.CATCH_ALL : null,
       riskSignals: risks,
       recommendedAction,
       evidence: ev,
@@ -351,11 +361,10 @@ export class VerificationEngine {
 }
 
 // ---- Dimension 1: technical deliverability --------------------------------
-// Catch-all is checked BEFORE confirmed: real+random both 250 → risky/ACCEPT_ALL,
-// never deliverable.
+// Catch-all → ACCEPTED (positive). Never REVIEW solely for unconfirmed mailbox.
 function assessDeliverability(f) {
   if (f.mailboxRejected) return DELIVERABILITY.UNDELIVERABLE;
-  if (f.catchAll) return DELIVERABILITY.RISKY;
+  if (f.catchAll) return DELIVERABILITY.ACCEPTED;
   if (f.mailboxConfirmed) return DELIVERABILITY.DELIVERABLE;
   return DELIVERABILITY.UNKNOWN;
 }
@@ -370,25 +379,27 @@ function assessConfidence(f) {
 }
 
 // ---- Technical deliverability score (0-100) -------------------------------
+// Only actual negative evidence reduces the score. Catch-all / unknown SMTP
+// incompleteness are NOT penalties.
 function scoreDeliverability(f, deliverability) {
   if (deliverability === DELIVERABILITY.UNDELIVERABLE) return 5;
   if (deliverability === DELIVERABILITY.DELIVERABLE) return 100;
-  // Catch-all: healthy mail infrastructure, unconfirmed mailbox — score reflects
-  // that positively without claiming a proven individual inbox.
-  if (deliverability === DELIVERABILITY.RISKY) return 78;
+  if (deliverability === DELIVERABILITY.ACCEPTED) return 100; // positive, no penalty
+  if (deliverability === DELIVERABILITY.RISKY) return 55; // reserved for real risk signals
 
-  let score = 50;
-  if (f.hasMx) score += 20;
-  else if (f.aOnly) score += 5;
-  if (f.greylisted) score -= 5;
-  return Math.max(0, Math.min(75, score));
+  // UNKNOWN: neutral — credit healthy domain/MX, do not punish inconclusive SMTP.
+  let score = 72;
+  if (f.hasMx) score = 80;
+  else if (f.aOnly) score = 70;
+  return Math.max(0, Math.min(85, score));
 }
 
 // ---- Recommended action ---------------------------------------------------
 function recommendAction({ deliverability, facts }) {
   if (deliverability === DELIVERABILITY.UNDELIVERABLE) return ACTION.REMOVE;
   if (deliverability === DELIVERABILITY.DELIVERABLE) return ACTION.KEEP;
-  if (deliverability === DELIVERABILITY.RISKY) return ACTION.REVIEW;
+  // Catch-all is campaign-eligible (KEEP → classification safe).
+  if (deliverability === DELIVERABILITY.ACCEPTED) return ACTION.KEEP;
   if (facts.smtpUnavailable || facts.greylisted) return ACTION.REVERIFY;
   return ACTION.REVIEW;
 }
@@ -440,11 +451,10 @@ function buildSmtpEvidence(smtp, { finalReason }) {
 
 // ---- Explanation ----------------------------------------------------------
 function buildReasons({ reasons, deliverability, confidence, facts, mailboxStatus }) {
-  if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || (deliverability === DELIVERABILITY.RISKY && facts.catchAll)) {
+  if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || deliverability === DELIVERABILITY.ACCEPTED || facts.catchAll) {
     reasons.push(
-      'Mail infrastructure looks healthy (DNS, MX, SMTP all respond). The domain ' +
-      'is catch-all, so any address is accepted at SMTP time — this mailbox is ' +
-      'plausible and not marked invalid, but it cannot be independently confirmed.'
+      'Accepted by a catch-all mail server. Individual mailbox existence cannot be ' +
+      'independently confirmed. Mail infrastructure is healthy — this is not a failure.'
     );
   } else if (deliverability === DELIVERABILITY.DELIVERABLE) {
     reasons.push('The mailbox was directly confirmed to exist and can receive mail.');
@@ -482,18 +492,19 @@ function recommendationText({ recommendedAction, facts, mailboxStatus }) {
     case ACTION.REMOVE:
       return 'REMOVE — strong technical evidence this address cannot receive mail.';
     case ACTION.KEEP:
+      if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll) {
+        return 'KEEP — Accepted by a catch-all mail server. Individual mailbox existence ' +
+          'cannot be independently confirmed.';
+      }
       return facts.role
         ? 'KEEP — deliverable. Note: this is a shared/role mailbox; confirm it suits your campaign.'
         : 'KEEP — deliverable with high confidence.';
     case ACTION.REVERIFY:
       return 'REVERIFY — technically plausible, but the mailbox could not be confirmed here. ' +
-             'Re-check where live SMTP verification is available.';
+             'Re-check where live SMTP verification is available. This is unconfirmed, not invalid.';
     case ACTION.REVIEW:
     default:
-      return mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll
-        ? 'REVIEW — healthy catch-all domain; keep for known/low-volume contacts. ' +
-          'Mailbox is unconfirmed (not undeliverable); confirm before large cold campaigns.'
-        : 'REVIEW — evidence is mixed; a human decision is recommended.';
+      return 'REVIEW — evidence indicates real risk or conflicting signals; a human decision is recommended.';
   }
 }
 
@@ -506,6 +517,7 @@ function finalize(email, r) {
     // Additive proven-mailbox + evidence-quality dimensions (UI/API compatible).
     mailboxStatus: r.mailboxStatus || MAILBOX_STATUS.UNKNOWN,
     verificationQuality: r.verificationQuality || VERIFICATION_QUALITY.LOW,
+    acceptanceType: r.acceptanceType || null,
     riskSignals: r.riskSignals || [],
     recommendedAction: r.recommendedAction,
     evidence: r.evidence || [],
@@ -516,6 +528,7 @@ function finalize(email, r) {
 
     // ---- Backward-compatible derived fields ----
     score: r.deliverabilityScore,
+    // KEEP → safe (campaign-eligible), including catch-all ACCEPTED.
     classification: mapAction(r.recommendedAction),
     status: r.deliverability,
     signals: r.evidence || [],

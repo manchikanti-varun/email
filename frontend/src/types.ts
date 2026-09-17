@@ -12,9 +12,10 @@ export interface User {
 
 export type Classification = 'safe' | 'review' | 'remove' | 'unknown';
 export type RecommendedAction = 'keep' | 'review' | 'reverify' | 'remove';
-export type Deliverability = 'deliverable' | 'risky' | 'unknown' | 'undeliverable';
+export type Deliverability = 'deliverable' | 'accepted' | 'risky' | 'unknown' | 'undeliverable';
 export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
 export type MailboxStatus = 'DELIVERABLE' | 'UNDELIVERABLE' | 'ACCEPT_ALL' | 'UNKNOWN';
+export type AcceptanceType = 'CATCH_ALL';
 export type VerificationQuality = 'HIGH' | 'MEDIUM' | 'LOW';
 export type SignalStatus = 'pass' | 'warn' | 'fail' | 'info';
 
@@ -63,6 +64,8 @@ export interface Contact {
   confidence?: Confidence;
   /** Proven mailbox outcome (additive; catch-all → ACCEPT_ALL). */
   mailboxStatus?: MailboxStatus;
+  /** Set when deliverability is accepted via catch-all. */
+  acceptanceType?: AcceptanceType | null;
   /** Strength of SMTP/DNS evidence (additive). */
   verificationQuality?: VerificationQuality;
   smtpEvidence?: SmtpEvidence | null;

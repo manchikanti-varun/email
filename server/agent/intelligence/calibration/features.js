@@ -97,14 +97,19 @@ export function toDeliverability(label) {
     case 'valid':
     case 'keep':
       return 'deliverable';
+    case 'accepted':
+    case 'accept_all':
+    case 'catch-all':
+    case 'catch_all':
+      // Catch-all is positive/accepted; for ML vocabulary fold toward deliverable
+      // so it is not treated as a negative "risky" class.
+      return 'deliverable';
     case 'undeliverable':
     case 'remove':
     case 'invalid':
       return 'undeliverable';
     case 'risky':
     case 'review':
-    case 'catch-all':
-    case 'catch_all':
       return 'risky';
     default:
       return 'unknown';

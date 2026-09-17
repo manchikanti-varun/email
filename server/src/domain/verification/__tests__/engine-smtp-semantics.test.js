@@ -80,14 +80,15 @@ test('worker reports 550 (rejected) -> UNDELIVERABLE, remove', async () => {
   assert.equal(r.recommendedAction, ACTION.REMOVE);
 });
 
-test('catch-all -> RISKY + review, NOT removed (mailboxStatus ACCEPT_ALL)', async () => {
+test('catch-all -> ACCEPTED + KEEP (campaign-eligible), NOT removed', async () => {
   const smtp = { check: async () => ({ reachable: true, catchAll: true, source: 'smtp-worker' }) };
   const r = await engineWith({ smtp }).verify('anyone@example.com');
-  assert.equal(r.deliverability, DELIVERABILITY.RISKY);
+  assert.equal(r.deliverability, DELIVERABILITY.ACCEPTED);
   assert.equal(r.mailboxStatus, 'ACCEPT_ALL');
-  assert.equal(r.recommendedAction, ACTION.REVIEW);
-  assert.ok(r.deliverabilityScore >= 70);
-  assert.ok(r.reasons.some((t) => /healthy/i.test(t)));
+  assert.equal(r.recommendedAction, ACTION.KEEP);
+  assert.equal(r.classification, 'safe');
+  assert.equal(r.score, 100);
+  assert.ok(r.reasons.some((t) => /catch-all|Accepted/i.test(t)));
 });
 
 test('role-based address that is deliverable -> KEEP, role is a characteristic not a penalty', async () => {

@@ -156,7 +156,8 @@ export function explainEmail({ contact, mode = 'simple' }) {
   let simple;
   if (deliverability === 'deliverable') simple = 'This email appears deliverable — the mailbox was confirmed to accept mail.';
   else if (deliverability === 'undeliverable') simple = 'This email cannot receive mail and should be removed.';
-  else if (deliverability === 'risky' || catchAll) simple = 'This domain\'s mail path looks healthy (catch-all). The address is plausible and not invalid, but the specific mailbox cannot be independently confirmed — fine to keep for known contacts; confirm before large cold campaigns.';
+  else if (deliverability === 'accepted' || catchAll) simple = 'Accepted by a catch-all mail server. Individual mailbox existence cannot be independently confirmed. This is campaign-eligible — not a failure.';
+  else if (deliverability === 'risky') simple = 'This address has risk signals that warrant human review before sending.';
   else if (greylisted) simple = 'The mail server gave a temporary response; a later re-check should clarify this address.';
   else simple = 'This email could not be confirmed. It is unconfirmed rather than invalid, and is a candidate for re-verification.';
   if (role) simple += ' It is a shared/role mailbox, which is a characteristic, not a fault.';

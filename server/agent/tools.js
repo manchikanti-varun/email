@@ -16,7 +16,7 @@ import { PERMISSION } from './permissions.js';
 import { validate } from './schemas.js';
 
 const CLASSIFICATION = ['safe', 'review', 'remove', 'unknown'];
-const DELIVERABILITY = ['deliverable', 'undeliverable', 'risky', 'unknown'];
+const DELIVERABILITY = ['deliverable', 'accepted', 'undeliverable', 'risky', 'unknown'];
 
 // ---- Tool definitions ------------------------------------------------------
 // ctx shape: { userId, useCases, repos:{ users, lists, contacts, history, alerts }, config }
@@ -118,7 +118,7 @@ export const TOOLS = [
   },
   {
     name: 'get_risky_contacts',
-    description: 'Get contacts whose deterministic deliverability is "risky" (e.g. catch-all domains).',
+    description: 'Get contacts whose deterministic deliverability is "risky" (true risk signals). Catch-all addresses are now "accepted", not risky.',
     permission: PERMISSION.READ,
     confirm: false,
     input: { type: 'object', required: ['listId'], additionalProperties: false, properties: { listId: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 } } },

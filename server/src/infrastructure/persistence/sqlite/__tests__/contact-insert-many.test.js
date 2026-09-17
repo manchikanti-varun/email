@@ -38,6 +38,7 @@ before(() => {
       mailbox_status TEXT,
       verification_quality TEXT,
       smtp_evidence TEXT,
+      acceptance_type TEXT,
       verified_at TEXT
     );
   `);

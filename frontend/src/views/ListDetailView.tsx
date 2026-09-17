@@ -302,7 +302,7 @@ function PreflightCard({ id }: { id: string }) {
             <div>
               {bar('Safe', p.buckets.safe, 'var(--safe)')}
               {bar('Review', p.buckets.review, 'var(--review)')}
-              {bar('Catch-all (healthy)', p.buckets.catchAll, 'var(--brand)')}
+              {bar('Accepted (catch-all)', p.buckets.catchAll, 'var(--safe)')}
               {bar('Invalid', p.buckets.invalid, 'var(--remove)')}
               {bar('Disposable', p.buckets.disposable, 'var(--remove)')}
               {bar('Unknown', p.buckets.unknown, 'var(--unknown)')}

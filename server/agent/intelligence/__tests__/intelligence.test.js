@@ -19,10 +19,11 @@ import {
 test('listStatistics counts classifications, risks and smtp sources', () => {
   const s = listStatistics(mixedContacts());
   assert.equal(s.total, 7);
-  assert.equal(s.classification.safe, 4); // 3 good.com + 1 role-based info@corp.com
-  assert.equal(s.classification.review, 1);
+  assert.equal(s.classification.safe, 5); // 3 good.com + catch-all accepted + role-based info@corp.com
+  assert.equal(s.classification.review, 0);
   assert.equal(s.classification.remove, 1);
   assert.equal(s.classification.unknown, 1);
+  assert.equal(s.deliverability.accepted, 1);
   assert.equal(s.risk.catch_all, 1);
   assert.equal(s.risk.disposable, 1);
   assert.equal(s.risk.role_based, 1);
@@ -183,16 +184,19 @@ test('optimizeCredits allocates budget to highest value first', () => {
 // -------------------------------------------------------------- explanation
 test('explainEmail gives simple and technical text without inventing facts', () => {
   const c = contact({
-    email: 'sales@corp.com', deliverability: 'risky', status: 'risky', confidence: 'medium',
-    classification: 'review', recommendedAction: 'review',
-    riskSignals: [{ code: 'catch_all', label: 'Catch-all domain' }],
-    signals: [{ label: 'SMTP server responds', status: 'pass' }, { label: 'Catch-all domain', status: 'warn' }],
+    email: 'sales@corp.com', deliverability: 'accepted', status: 'accepted', confidence: 'medium',
+    classification: 'safe', recommendedAction: 'keep', acceptanceType: 'CATCH_ALL',
+    riskSignals: [{ code: 'catch_all', label: 'Catch-all · accepted' }],
+    signals: [
+      { label: 'SMTP server responds', status: 'pass' },
+      { label: 'Catch-all domain (mail path healthy)', status: 'info' },
+    ],
   });
   const simple = explainEmail({ contact: c, mode: 'simple' });
   const tech = explainEmail({ contact: c, mode: 'technical' });
-  assert.match(simple.explanation, /accepts mail for any address|cannot be independently confirmed/i);
+  assert.match(simple.explanation, /catch-all|cannot be independently confirmed|campaign-eligible/i);
   assert.match(tech.explanation, /SMTP server responds|Catch-all/);
-  assert.match(tech.explanation, /Deliverability=risky/);
+  assert.match(tech.explanation, /Deliverability=accepted/);
 });
 
 test('explainEmail returns insufficient for missing contact', () => {

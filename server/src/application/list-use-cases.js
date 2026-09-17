@@ -131,9 +131,15 @@ export class GetCleaningPlan {
     const contacts = this.contacts.findByList(list.id);
     const plan = { keep: [], review: [], remove: [] };
     for (const c of contacts) {
-      if (c.classification === 'safe') plan.keep.push(c.email);
+      const catchAll = c.acceptanceType === 'CATCH_ALL'
+        || c.mailboxStatus === 'ACCEPT_ALL'
+        || c.status === 'accepted'
+        || c.deliverability === 'accepted'
+        || (Array.isArray(c.riskSignals) && c.riskSignals.some((r) => r?.code === 'catch_all'));
+      // Catch-all is campaign-eligible even if an older row still says review.
+      if (c.classification === 'safe' || catchAll) plan.keep.push(c.email);
       else if (c.classification === 'remove') plan.remove.push(c.email);
-      else plan.review.push(c.email); // review + unknown
+      else plan.review.push(c.email); // true review + unknown
     }
     return {
       keep: plan.keep.length,
@@ -154,8 +160,15 @@ export class GetExportData {
     if (!list) throw new AppError(404, 'List not found');
 
     let contacts = this.contacts.findByList(list.id);
-    if (filter === 'campaign') contacts = contacts.filter((c) => c.classification === 'safe');
-    else if (['safe', 'review', 'remove', 'unknown'].includes(filter)) {
+    if (filter === 'campaign') {
+      contacts = contacts.filter((c) => {
+        if (c.classification === 'safe') return true;
+        // Catch-all accepted = campaign-eligible
+        if (c.acceptanceType === 'CATCH_ALL' || c.mailboxStatus === 'ACCEPT_ALL') return true;
+        if (c.status === 'accepted' || c.deliverability === 'accepted') return true;
+        return Array.isArray(c.riskSignals) && c.riskSignals.some((r) => r?.code === 'catch_all');
+      });
+    } else if (['safe', 'review', 'remove', 'unknown'].includes(filter)) {
       contacts = contacts.filter((c) => c.classification === filter);
     }
     return { list, contacts, filter };

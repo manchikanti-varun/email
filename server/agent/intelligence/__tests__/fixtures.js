@@ -28,9 +28,11 @@ export function mixedContacts() {
     contact({ email: 'b@good.com' }),
     contact({ email: 'c@good.com' }),
     contact({
-      email: 'sales@corp.com', deliverability: 'risky', status: 'risky', confidence: 'medium',
-      classification: 'review', recommendedAction: 'review', score: 55, smtpSource: 'local-smtp',
-      riskSignals: [{ code: 'catch_all', label: 'Catch-all domain' }],
+      email: 'sales@corp.com', deliverability: 'accepted', status: 'accepted', confidence: 'medium',
+      classification: 'safe', recommendedAction: 'keep', acceptanceType: 'CATCH_ALL',
+      score: 100, smtpSource: 'local-smtp',
+      riskSignals: [{ code: 'catch_all', label: 'Catch-all · accepted' }],
+      signals: [{ status: 'info', label: 'Catch-all domain (mail path healthy)' }],
     }),
     contact({
       email: 'x@mailinator.com', deliverability: 'undeliverable', status: 'undeliverable', confidence: 'high',
