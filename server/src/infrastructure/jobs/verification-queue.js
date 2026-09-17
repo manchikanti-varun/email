@@ -81,14 +81,17 @@ export class VerificationQueue {
     const pending = this.contacts.findPending(job.list_id, job.type);
     const emails = pending.map((c) => c.email);
 
-    // Pre-resolve DNS for all unique domains so concurrent workers hit the
-    // in-process cache instead of thundering-herd on the same MX records.
+    // Warm DNS in the background. Do NOT block the first verifications on a
+    // full-domain resolve — that made diverse lists sit at 0% before any work.
     if (emails.length > 0) {
-      try { await this.engine.preResolveDomains(emails); } catch { /* best-effort */ }
+      this.engine.preResolveDomains(emails).catch(() => null);
     }
 
     let done = job.done || 0;
     let index = 0;
+    // Publish progress immediately so the UI leaves "0 / N" as soon as the
+    // first contacts finish (previously only every 25 → looked stuck).
+    this.jobs.updateProgress(job.id, done);
 
     const worker = async () => {
       while (index < emails.length) {
@@ -103,9 +106,8 @@ export class VerificationQueue {
           // leave unverified; a resume will retry it
         }
         done++;
-        if (done % 25 === 0 || done === emails.length + (job.done || 0)) {
-          this.jobs.updateProgress(job.id, done);
-        }
+        // Every contact — SQLite updates are cheap vs SMTP wait time.
+        this.jobs.updateProgress(job.id, done);
       }
     };
 

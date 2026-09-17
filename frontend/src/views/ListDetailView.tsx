@@ -53,6 +53,10 @@ function ProgressCard({ name, progress }: { name: string; progress: Progress | n
             ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} verified (${pct}%)`
             : 'Starting…'}
         </p>
+        <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          Diverse domains need live SMTP checks (DNS + mailbox probe). Progress updates as each
+          address finishes — the first ones can take a few seconds if mail servers are slow or blocked.
+        </p>
       </div>
     </>
   );

@@ -148,7 +148,8 @@ const CATCHALL_TTL_MS = 10 * 60 * 1000;
 
 // Prefer the primary MX, but fall back when it is unreachable. Caps keep bulk
 // verification from walking long MX lists (each miss costs a full timeout).
-export const MAX_MX_ATTEMPTS = 5;
+// 3 is enough for most domains; 5 × timeout made diverse lists crawl.
+export const MAX_MX_ATTEMPTS = 3;
 
 export class SocketSmtpProbe extends SmtpProbe {
   /**
@@ -217,11 +218,18 @@ export class SocketSmtpProbe extends SmtpProbe {
     let lastClass = SMTP_CLASS.UNKNOWN;
     let totalAttempts = 0;
 
-    for (const host of hosts) {
+    for (let hi = 0; hi < hosts.length; hi++) {
+      const host = hosts[hi];
       triedHosts.push(host);
 
+      // Primary gets the full timeout; fallback MX hosts get a shorter budget
+      // so one dead primary does not burn N × SMTP_TIMEOUT_MS per email.
+      const hostTimeoutMs = hi === 0
+        ? this.cfg.timeoutMs
+        : Math.min(this.cfg.timeoutMs, Math.max(2000, Math.floor(this.cfg.timeoutMs / 2)));
+
       const { result: res, attempts } = await withTransportRetry(
-        () => this._probe(host, from, recipients, this.cfg.timeoutMs),
+        () => this._probe(host, from, recipients, hostTimeoutMs),
         {
           maxRetries: this._maxRetries,
           isRetryable: (r) => {

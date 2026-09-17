@@ -86,6 +86,20 @@ test('MX fallback: all hosts unreachable -> inconclusive + mxUnreachable', async
   assert.equal(r.smtpClass, 'timeout');
 });
 
+test('MX fallback: secondary hosts use a shorter timeout budget', async () => {
+  const timeouts = [];
+  const p = probe(async (host, _from, _recipients, timeoutMs) => {
+    timeouts.push({ host, timeoutMs });
+    return { connected: false, rcpt: {}, error: 'timeout' };
+  });
+  // Override cfg timeout to a known value.
+  p.cfg.timeoutMs = 6000;
+  await p.check('user@example.com', ['mx1.example.com', 'mx2.example.com', 'mx3.example.com']);
+  assert.equal(timeouts[0].timeoutMs, 6000);
+  assert.equal(timeouts[1].timeoutMs, 3000);
+  assert.equal(timeouts[2].timeoutMs, 3000);
+});
+
 test('catch-all: both 250 → catchAll and NOT mailboxExists', async () => {
   const p = probe(async (_host, _from, recipients) => {
     const out = { connected: true, greeting: 220, rcpt: {}, rcptText: {}, error: null };

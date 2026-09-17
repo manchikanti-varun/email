@@ -70,7 +70,7 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
   // Resolve MX list if the caller didn't supply hosts (the main app usually
   // does, to avoid duplicate DNS work — but we support both). Prefer an
   // explicit mxHosts[] so we can fall back when the primary MX is unreachable.
-  const MAX_MX_ATTEMPTS = 5;
+  const MAX_MX_ATTEMPTS = 3;
   let mxHosts = [];
   if (Array.isArray(req.body.mxHosts) && req.body.mxHosts.length) {
     mxHosts = req.body.mxHosts.map(String);
@@ -110,13 +110,18 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
     // through to the next MX.
     let settledMailbox = null; // { target, targetStatus, catchAll, probeStatus }
 
-    for (const host of mxHosts) {
+    for (let hi = 0; hi < mxHosts.length; hi++) {
+      const host = mxHosts[hi];
       mxHost = host;
       triedHosts.push(host);
+      // Shorter budget on fallback MX hosts after a primary timeout.
+      const hostTimeoutMs = hi === 0
+        ? config.connectTimeoutMs
+        : Math.min(config.connectTimeoutMs, Math.max(2000, Math.floor(config.connectTimeoutMs / 2)));
       const run = await withRetry(
         () => smtpConversation(host, {
           from: config.mailFrom, ehlo: config.ehloName,
-          recipients, timeoutMs: config.connectTimeoutMs,
+          recipients, timeoutMs: hostTimeoutMs,
           port: config.mxPort,
         }),
         { maxRetries: config.maxRetries, shouldRetry: transportErrorRetryable },
