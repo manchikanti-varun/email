@@ -1,0 +1,47 @@
+# One-command deploy for the MailHealth SMTP verification worker.
+#
+#   cd smtp-worker
+#   cp .env.example .env      # set WORKER_SECRET, SMTP_FROM, WORKER_DOMAIN
+#   docker compose up -d --build
+#
+# Runs two containers:
+#   smtp-worker : the port-25 SMTP prober (bound to localhost only)
+#   caddy       : TLS termination + ACME certs, so the app can call it over HTTPS
+#
+# REQUIREMENT: this host must permit OUTBOUND TCP port 25. Verify with:
+#   curl -s http://127.0.0.1:8090/health   ->  "outboundPort25": true
+# (Vultr: request the unblock via support ticket first. Contabo: open by default.)
+
+services:
+  smtp-worker:
+    build: .
+    image: mailhealth-smtp-worker
+    container_name: smtp-worker
+    restart: unless-stopped
+    env_file: .env
+    # Bound to loopback only: never exposed to the public internet directly.
+    # Caddy reaches it over the internal compose network as `smtp-worker:8090`.
+    ports:
+      - "127.0.0.1:8090:8090"
+    mem_limit: 512m
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: smtp-worker-caddy
+    restart: unless-stopped
+    depends_on:
+      - smtp-worker
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Caddyfile reads this via {$WORKER_DOMAIN}.
+      - WORKER_DOMAIN=${WORKER_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

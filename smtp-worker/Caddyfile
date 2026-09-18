@@ -1,0 +1,18 @@
+# Caddy config for the MailHealth SMTP worker.
+#
+# The hostname comes from WORKER_DOMAIN in smtp-worker/.env, so the same file
+# works for any deployment. Caddy obtains and renews the TLS certificate
+# automatically over ACME — but ONLY once an A/AAAA record for WORKER_DOMAIN
+# points at this server, and ports 80 + 443 are reachable from the internet.
+#
+# The main app needs HTTPS because it sends the worker bearer secret:
+#   SMTP_WORKER_URL=https://<WORKER_DOMAIN>
+#   SMTP_WORKER_SECRET=<same WORKER_SECRET>
+#
+# /internal/verify is still authenticated by the worker itself (bearer token),
+# rate limited per IP, and concurrency bounded — Caddy only terminates TLS.
+
+{$WORKER_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy smtp-worker:8090
+}

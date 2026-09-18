@@ -20,3 +20,4 @@ _*.csv
 .DS_Store
 *.md
 !README.md
+docs/

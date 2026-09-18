@@ -22,7 +22,8 @@ should be removed or reviewed, and **exactly why**.
   disposable detection, role-account detection, catch-all detection,
   temporary-failure / greylisting handling.
 - **Risk classification** — every address is `Safe`, `Review`, `Remove`, or `Unknown`
-  (never a bare valid/invalid).
+  (never a bare valid/invalid). Catch-all addresses are `Safe`/`Accepted`
+  (campaign-eligible) with a descriptive signal, not a review verdict.
 - **Explainable results** — each address gets plain-language reasons and a
   business recommendation.
 - **Deliverability health score** — 0–100 per address, plus an overall list
@@ -40,7 +41,8 @@ should be removed or reviewed, and **exactly why**.
 
 ## How verification works
 
-The pipeline is a hybrid, local-first engine (`server/verify/`):
+The pipeline is a hybrid, local-first engine (`server/src/domain/verification/`,
+with adapters in `server/src/infrastructure/verification/`):
 
 1. **Syntax** — pragmatic RFC check + normalisation.
 2. **Disposable / role** — matched against reference lists (bundled + optional
@@ -80,17 +82,19 @@ The pipeline is a hybrid, local-first engine (`server/verify/`):
 
 ## Whole-product capabilities (beyond the MVP)
 
-- **Background job queue** (`queue.js`) — bulk verification runs as persistent,
-  **resumable** jobs; an interrupted run picks up unverified contacts on restart.
+- **Background job queue** (`src/infrastructure/jobs/verification-queue.js`) —
+  bulk verification runs as persistent, **resumable** jobs; an interrupted run
+  picks up unverified contacts on restart.
 - **Greylisting retry** — temp-failure/greylisted addresses get a `retry_after`
   timestamp and are automatically re-checked by the scheduler.
-- **Scheduled re-verification** (`scheduler.js`) — per-list interval; each run
-  snapshots list health so you can watch it change over time.
+- **Scheduled re-verification** (`src/infrastructure/jobs/scheduler.js`) —
+  per-list interval; each run snapshots list health so you can watch it change
+  over time.
 - **Health-drop alerts** — when a re-verification lowers list health, an alert is
   raised (with reasons) and a `health.dropped` webhook fires.
-- **Webhooks** (`webhooks.js`) — per-user endpoints for `job.completed` /
-  `health.dropped` / all events, with optional HMAC-SHA256 signing. Standardized
-  payloads suit Zapier / Make / CRMs (section 10).
+- **Webhooks** (`src/infrastructure/webhooks/http-webhook-sender.js`) — per-user
+  endpoints for `job.completed` / `health.dropped` / all events, with optional
+  HMAC-SHA256 signing. Standardized payloads suit Zapier / Make / CRMs.
 - **Benchmark harness** (`npm run benchmark`) — runs a labelled dataset through
   the local engine and the provider, reporting accuracy, agreement, per-address
   time, and estimated provider cost (section 14).
@@ -104,6 +108,12 @@ The pipeline is a hybrid, local-first engine (`server/verify/`):
 > (retry candidates) rather than wrongly rejected. Set `SMTP_ENABLED=false`
 > in `.env` to skip live probing entirely — results then rely on syntax, DNS,
 > MX, disposable and role signals.
+>
+> `SMTP_MODE` controls routing: `auto` (default) tries local port 25 and falls
+> back to the MailHealth SMTP worker, `local` uses only the local probe,
+> `remote` always uses the worker, and `disabled` performs no probing. Point
+> `SMTP_WORKER_URL` + `SMTP_WORKER_SECRET` at a deployed worker — see
+> [SMTP Worker](docs/SMTP-WORKER.md).
 
 ## Running locally
 
@@ -135,33 +145,48 @@ curl -X POST http://localhost:3000/api/verify/single \
 
 ```
 server/
-  index.js            Express app + static hosting; boots queue/scheduler/feeds
-  config.js           env config + .env loader
-  db.js               SQLite schema + migrations (better-sqlite3)
-  auth.js             hashing, JWT, credit charging, middleware
-  parse.js            CSV/XLSX/TXT parsing + column detection + dedup
-  queue.js            persistent, resumable background verification jobs
-  scheduler.js        scheduled re-verification + greylist retries
-  webhooks.js         outbound webhook delivery (HMAC-signed)
-  benchmark.js        verification-quality benchmark harness (bring your own dataset)
-  verify/
-    engine.js         orchestration, scoring, classification, explanations
-    syntax.js         syntax validation
-    dns.js            DNS/MX resolution (cached)
-    smtp.js           SMTP mailbox + catch-all probe
-    providers.js      optional external providers (ZeroBounce/Kickbox)
-    health.js         list-level health scoring
-    data.js           disposable/role/free/typo data (+ feed loader)
-  routes/
-    auth.js  verify.js  lists.js  campaign.js  integrations.js
-frontend/                  React + TypeScript app (Vite); builds into public/
+  index.js            thin entrypoint -> src/main.js
+  config.js           env config + .env loader + prod safety checks
+  benchmark.js        verification-quality harness (uses the real engine)
+  src/
+    domain/
+      entities/         user.js, contact.js
+      verification/     engine.js, syntax.js, smtp-classify.js, health.js,
+                        reference-data.js, __tests__/
+      ports/            index.js  (repository + gateway contracts)
+    application/        *-use-cases.js (auth, verify, list, campaign,
+                        integration, agent, ai) + errors.js
+    infrastructure/
+      persistence/sqlite/   connection.js + one repository per aggregate
+      verification/         node-dns-resolver, socket-smtp-probe,
+                            remote-smtp-probe, smtp-router, smtp-policy,
+                            providers, feed-loader
+      security/             bcrypt-password-hasher, jwt-token-service,
+                            api-key-service
+      webhooks/             http-webhook-sender
+      jobs/                 verification-queue, scheduler
+      parsing/              file-parser
+    interfaces/http/
+      app.js            buildApp(container)
+      middleware.js     auth, logging, rate limits, errors, cookies
+      routes/           auth, verify, list, campaign, integration, agent, ai
+    container.js        composition root
+    main.js             start()
+  agent/              optional AI operator + intelligence layer
+frontend/             React + TypeScript app (Vite); builds into public/
   src/  index.html
-public/                    generated build output (served by the Node server)
-data/feeds/*.txt         optional disposable.txt / roles.txt feeds
+smtp-worker/          standalone port-25 SMTP worker (own package.json)
+public/               generated build output (served by the Node server)
+data/feeds/*.txt      optional disposable.txt / roles.txt feeds
 ```
 
 ## Not in this MVP (by design)
 
-Mobile app, large integration marketplace, AI chatbot, enterprise permissions,
-dozens of CRM integrations, advanced marketing automation, unlimited
-monitoring, and proprietary verification infrastructure before validation.
+Mobile app, large integration marketplace, a general-purpose chatbot (the
+MailHealth AI operator is deliberately list-focused and never invents
+verification results), enterprise permissions/RBAC, dozens of CRM
+integrations, advanced marketing automation, and unlimited monitoring.
+
+Also not tracked by design: sender-specific **engagement** (opens/clicks) and
+**communication eligibility** (unsubscribes/suppression) — these depend on
+data the platform does not collect, so it makes no claims about them.

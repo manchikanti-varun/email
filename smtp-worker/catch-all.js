@@ -3,7 +3,10 @@
 // random, almost-certainly-nonexistent local part in the SAME conversation.
 //
 // catch-all is NOT invalid — it means the specific mailbox cannot be
-// independently confirmed. The engine treats it as risky/review.
+// independently confirmed. It is POSITIVE mail-infrastructure evidence: the
+// engine records it as deliverability "accepted" / mailboxStatus ACCEPT_ALL /
+// action KEEP (campaign-eligible), with a descriptive catch_all risk signal —
+// never a REVIEW or health penalty.
 //
 // Catch-all is a DOMAIN property, so we memoize confident accept/reject results
 // briefly. Bulk runs with many addresses on the same domain then skip the

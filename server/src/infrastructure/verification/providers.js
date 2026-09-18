@@ -30,6 +30,18 @@ export class NullProvider extends VerificationProvider {
   }
 }
 
+// ZeroBounce statuses that are definitive NEGATIVE evidence. `do_not_mail`,
+// `spamtrap` and `abuse` are ZeroBounce's own hard-suppression verdicts: the
+// address must not be mailed, so they map to undeliverable/remove rather than
+// being left as "unknown". Everything not listed here stays UNCONFIRMED
+// (deliverable=null) so the platform never turns absence of evidence into a
+// negative verdict.
+const ZB_UNDELIVERABLE = new Set(['invalid', 'do_not_mail', 'spamtrap', 'abuse']);
+
+// "The domain accepts everything" — positive infrastructure evidence that the
+// individual mailbox cannot be independently proven (engine → accepted/KEEP).
+const ZB_CATCH_ALL = new Set(['catch-all', 'catch_all', 'accept_all']);
+
 export class ZeroBounceProvider extends VerificationProvider {
   constructor(apiKey) { super(); this.apiKey = apiKey; }
   get name() { return 'zerobounce'; }
@@ -40,11 +52,17 @@ export class ZeroBounceProvider extends VerificationProvider {
     const data = await httpGetJson(url);
     const status = (data.status || '').toLowerCase();
     const sub = (data.sub_status || '').toLowerCase();
-    const catchAll = status === 'catch-all' || sub === 'catch_all';
+    const catchAll = ZB_CATCH_ALL.has(status) || sub === 'catch_all' || sub === 'accept_all';
     let deliverable = null;
     if (status === 'valid') deliverable = true;
-    else if (status === 'invalid') deliverable = false;
-    return { deliverable, catchAll, raw: status || 'unknown', provider: this.name };
+    else if (ZB_UNDELIVERABLE.has(status)) deliverable = false;
+    // 'catch-all' / 'unknown' / 'role_based' / anything else → null (unconfirmed).
+    return {
+      deliverable,
+      catchAll,
+      raw: status || 'unknown',
+      provider: this.name,
+    };
   }
 }
 

@@ -31,6 +31,30 @@ function loadDotEnv() {
 }
 loadDotEnv();
 
+// Normalise quoted environment values.
+//
+// Some deployment platforms store `KEY="value"` with the quote characters as
+// part of the value, so Node hands the app `"value"` (quotes included). That
+// silently breaks typed settings: `SMTP_ENABLED="true"` reads as false,
+// `COOKIE_SECURE="true"` reads as false, `SMTP_TIMEOUT_MS="5000"` becomes NaN,
+// and `DATA_DIR="/data"` writes the database outside the mounted volume.
+//
+// The .env file loader below already strips surrounding quotes from file
+// values; this makes platform-set variables behave identically, regardless of
+// whether the quotes came from a .env file, a Docker `-e KEY="..."`, or a
+// dashboard paste. Only a single matching pair of surrounding quotes is
+// removed — values that merely contain quotes are untouched.
+function normalizeQuotedEnv() {
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value !== 'string' || value.length < 2) continue;
+    const first = value[0];
+    if ((first === '"' || first === "'") && value[value.length - 1] === first) {
+      process.env[key] = value.slice(1, -1);
+    }
+  }
+}
+normalizeQuotedEnv();
+
 const nodeEnv = (process.env.NODE_ENV || 'development').toLowerCase();
 const isProd = nodeEnv === 'production';
 
@@ -162,6 +186,23 @@ export function assertProductionConfig() {
   }
   if (config.smtp.mode === 'remote' && !config.smtpWorker.url) {
     problems.push('SMTP_MODE=remote requires SMTP_WORKER_URL to be set.');
+  }
+  // Diagnose the most common cause of "every contact is Unknown": SMTP probing
+  // is enabled but there is no configured path that can open a connection when
+  // this host blocks outbound port 25. Not fatal (a local-only or provider-based
+  // setup is legitimate), but it must be loud, because the failure mode is
+  // otherwise invisible: syntax/DNS/MX all pass and results silently stay
+  // Unknown. See docs/SMTP-WORKER.md.
+  if (config.smtp.enabled && config.smtp.mode !== 'disabled' && !config.smtpWorker.url) {
+    console.warn(
+      `  [warn] SMTP probing is enabled (SMTP_MODE=${config.smtp.mode}) but SMTP_WORKER_URL is not set.`
+    );
+    console.warn(
+      '         If this host blocks outbound port 25, every address that passes syntax/DNS/MX will be reported as "unknown".'
+    );
+    console.warn(
+      '         Fix: deploy smtp-worker/ on a host with port 25 open and set SMTP_WORKER_URL + SMTP_WORKER_SECRET.'
+    );
   }
   if (problems.length) {
     console.error('\n  Refusing to start — insecure production configuration:');
