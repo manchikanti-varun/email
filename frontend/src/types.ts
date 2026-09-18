@@ -70,6 +70,8 @@ export interface Contact {
   verificationQuality?: VerificationQuality;
   smtpEvidence?: SmtpEvidence | null;
   finalReason?: string | null;
+  /** Which SMTP path produced the evidence: 'local-smtp' | 'smtp-worker' | 'none'. */
+  smtpSource?: string | null;
   recommendedAction?: RecommendedAction;
   recommendation?: string;
   reasons?: string[];
@@ -211,6 +213,10 @@ export interface DomainInsight {
   total: number;
   problemScore: number;
   recommendedAction: string;
+  // Backend also returns these (server detection-modules.js buildDomainInsights):
+  // a plain-language summary and per-classification percentages for the domain.
+  summary?: string;
+  percentages?: Record<string, number>;
 }
 
 export interface DomainsResult {

@@ -1,11 +1,13 @@
-// Thin typed API client. Uses cookie auth (set by the server) plus a token
-// fallback stored in localStorage.
+// Thin typed API client (facade).
 //
-// API base URL:
-//   - Same origin (local dev with Vite proxy, all-in-one deploy): leave empty,
-//     calls go to relative "/api".
-//   - Split deploy (frontend on Vercel, backend on Railway): set the backend
-//     URL in window.__API_BASE__ via /config.js.
+// The generic HTTP concerns (base URL, auth token, headers, JSON parsing,
+// HTTP/network errors, 401/429 handling) now live in services/http/client.ts.
+// This module keeps the exact same public surface it always had —
+//   `api`, `setToken`, `setUnauthorizedHandler`
+// — so every existing import continues to work unchanged. It maps the app's
+// endpoints onto the shared client. Feature-specific API slices will be layered
+// on top of this in later phases; for now the single `api` object is preserved
+// verbatim to avoid touching any view.
 import type {
   User,
   VerifyResult,
@@ -27,79 +29,19 @@ import type {
   VerificationHealth,
   CalibratedConfidence,
 } from './types';
+import {
+  API_BASE,
+  request,
+  setToken as clientSetToken,
+  setUnauthorizedHandler as clientSetUnauthorizedHandler,
+  authHeader,
+  notifyUnauthorized,
+} from './services/http/client';
 
-const API_BASE =
-  typeof window !== 'undefined' && window.__API_BASE__
-    ? String(window.__API_BASE__).replace(/\/$/, '')
-    : '';
-
-let token: string | null = localStorage.getItem('token');
-
-export function setToken(t: string | null): void {
-  token = t;
-  if (t) localStorage.setItem('token', t);
-  else localStorage.removeItem('token');
-}
-
-// Fired on 401 so the app can redirect to login.
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: () => void): void {
-  onUnauthorized = fn;
-}
-
-type Method = 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
-
-async function request<T = unknown>(
-  method: Method,
-  path: string,
-  body?: unknown,
-  isForm = false,
-): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-
-  let payload: BodyInit | undefined;
-  if (isForm) {
-    payload = body as FormData;
-  } else if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    payload = JSON.stringify(body);
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(API_BASE + '/api' + path, {
-      method,
-      headers,
-      body: payload,
-      credentials: 'include',
-    });
-  } catch {
-    throw new Error('Network error — could not reach the server. Check your connection.');
-  }
-
-  if (
-    res.status === 401 &&
-    onUnauthorized &&
-    path !== '/auth/me' &&
-    path !== '/auth/login' &&
-    path !== '/auth/register'
-  ) {
-    onUnauthorized();
-  }
-  if (res.status === 429) {
-    throw new Error('Too many requests. Please wait a moment and try again.');
-  }
-
-  const ct = res.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) {
-    if (!res.ok) throw new Error('Request failed (' + res.status + ')');
-    return res as unknown as T;
-  }
-  const data = await res.json();
-  if (!res.ok) throw new Error((data && data.error) || 'Request failed');
-  return data as T;
-}
+// Re-export the auth-token + unauthorized-handler controls so existing imports
+// (`import { api, setToken, setUnauthorizedHandler } from './api'`) keep working.
+export const setToken = clientSetToken;
+export const setUnauthorizedHandler = clientSetUnauthorizedHandler;
 
 /** Upload with NDJSON stage events: parsing → saving → done. */
 async function uploadListWithProgress(
@@ -108,8 +50,8 @@ async function uploadListWithProgress(
 ): Promise<UploadResult> {
   const headers: Record<string, string> = {
     Accept: 'application/x-ndjson',
+    ...authHeader(),
   };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
 
   onProgress?.({ stage: 'uploading' });
 
@@ -125,7 +67,7 @@ async function uploadListWithProgress(
     throw new Error('Network error — could not reach the server. Check your connection.');
   }
 
-  if (res.status === 401 && onUnauthorized) onUnauthorized();
+  if (res.status === 401) notifyUnauthorized();
   if (res.status === 429) {
     throw new Error('Too many requests. Please wait a moment and try again.');
   }
@@ -167,7 +109,8 @@ async function uploadListWithProgress(
       } else if (stage === 'error') {
         throw new Error(String(evt.error || 'Upload failed'));
       } else if (stage === 'done') {
-        const { stage: _s, ...rest } = evt;
+        const rest = { ...evt };
+        delete rest.stage;
         result = rest as unknown as UploadResult;
         onProgress?.({ stage: 'done', total: result.total });
       }

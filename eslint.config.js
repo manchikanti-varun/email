@@ -32,7 +32,12 @@ export default tseslint.config(
     // These modules intentionally co-locate a hook/utility with their provider
     // component (useAuth beside AuthProvider, toast() beside Toaster). The
     // Fast-Refresh-only warning does not apply to how they're used.
-    files: ['frontend/src/auth.tsx', 'frontend/src/components/Toaster.tsx'],
+    files: [
+      'frontend/src/auth.tsx',
+      'frontend/src/app/providers/AuthProvider.tsx',
+      'frontend/src/components/Toaster.tsx',
+      'frontend/src/components/ui/Toast.tsx',
+    ],
     rules: {
       'react-refresh/only-export-components': 'off',
     },

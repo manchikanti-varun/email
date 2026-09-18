@@ -1,0 +1,53 @@
+/* MailHealth design tokens (Phase 1A — additive only).
+ *
+ * The existing color/radius/shadow variables remain defined in styles.css and
+ * stay the single source of truth for current visuals — nothing here renames or
+ * overrides them, so the app looks identical after this change.
+ *
+ * This file ADDS the tokens the current stylesheet lacks: a spacing scale, a
+ * type scale, and SEMANTIC status aliases mapped onto the existing colors so new
+ * design-system components can reference intent ("deliverable") instead of a raw
+ * palette name ("--safe"). These are opt-in; no existing rule uses them yet.
+ */
+
+:root {
+  /* ---- Spacing scale (4px base) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ---- Type scale ---- */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-size-2xl: 28px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.55;
+
+  /* ---- Semantic status aliases (mapped to existing palette) ----
+   * Verdict/state intent, so components read as domain intent rather than color.
+   * These reference the palette defined in styles.css.
+   */
+  --status-deliverable: var(--safe);
+  --status-undeliverable: var(--remove);
+  --status-accept-all: var(--brand-2);   /* catch-all: positive/neutral, not danger */
+  --status-unknown: var(--unknown);
+  --status-risk: var(--review);
+  --status-success: var(--safe);
+  --status-warning: var(--review);
+  --status-error: var(--remove);
+  --status-info: var(--brand);
+}
