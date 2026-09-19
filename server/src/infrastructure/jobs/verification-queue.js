@@ -7,6 +7,8 @@
 // progress persisted every 25 contacts, list finalization (health snapshot),
 // health-drop alerting, and job.completed / health.dropped webhooks.
 
+import { chooseStableVerdict } from '../../domain/verification/verdict-stability.js';
+
 export class VerificationQueue {
   constructor({
     jobRepository,
@@ -93,6 +95,11 @@ export class VerificationQueue {
     // first contacts finish (previously only every 25 → looked stuck).
     this.jobs.updateProgress(job.id, done);
 
+    // On reverify, preserve a prior CONFIRMED verdict when the fresh probe is
+    // only inconclusive (timeout / transport failure). This stops transient
+    // network state from flipping a good address to Unknown between runs.
+    const isReverify = job.type === 'reverify' || job.type === 'retry';
+
     const worker = async () => {
       while (index < emails.length) {
         const i = index++;
@@ -100,6 +107,18 @@ export class VerificationQueue {
           const r = await this.engine.verify(emails[i]);
           if (this.calibrator) {
             try { r.confidenceCalibration = this.calibrator.calibrate(r); } catch { /* ML never breaks verification */ }
+          }
+          if (isReverify && this.contacts.findVerdict) {
+            const prior = this.contacts.findVerdict(pending[i].id);
+            const decision = chooseStableVerdict(prior, r);
+            if (decision.kept) {
+              // Keep the stronger prior verdict; just record it was re-checked
+              // so it is not perpetually re-queued.
+              try { this.contacts.touchVerified?.(pending[i].id, r.verified_at); } catch { /* non-fatal */ }
+              done++;
+              this.jobs.updateProgress(job.id, done);
+              continue;
+            }
           }
           this.contacts.saveResult(pending[i].id, r);
         } catch {

@@ -97,8 +97,8 @@ test('mixed list produces explainable, deterministic score with components', () 
   assert.equal(r.metrics.percentages.unknown, 5);
   assert.equal(r.metrics.percentages.acceptAll, 5);
 
-  // Expected weightedRisk = 10*1.0 (undeliverable) + 5*0.15 (unknown) + 5*0.10 (acceptAll)
-  //                       = 10 + 0.75 + 0.5 = 11.25  => score 88.75 ~ 88.8
+  // Expected weightedRisk = 10*1.0 (undeliverable) + 5*0.15 (unknown) + 5*0.0 (acceptAll)
+  //                       = 10 + 0.75 + 0 = 10.75  => score ~89.25 (acceptAll no longer penalised)
   const expected = 100 - (10 * HEALTH_WEIGHTS.undeliverable + 5 * HEALTH_WEIGHTS.unknown + 5 * HEALTH_WEIGHTS.acceptAll);
   assert.ok(Math.abs(r.healthScore - expected) < 0.2, `score ${r.healthScore} ~= ${expected}`);
   assert.equal(r.healthLevel, 'Good');

@@ -41,27 +41,32 @@ export function ContactTable({ contacts, listId }: { contacts: Contact[]; listId
         <EmptyState title="No matching contacts." />
       ) : (
         <>
-          <table className="contact-table">
-            <thead>
-              <tr>
-                <th scope="col">Email</th>
-                <th scope="col" title="Deterministic verification engine — the actual verdict, never guessed.">
-                  Verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
-                </th>
-                <th scope="col" title="Evidence strength behind the deterministic verdict.">Confidence</th>
-                <th scope="col" title="How reliable the verdict is. Uses a trained ML model when one is deployed; otherwise the engine's own rule-based confidence. Never changes the verdict.">
-                  Confidence&nbsp;%
-                </th>
-                <th scope="col">Risk signals</th>
-                <th scope="col" title="Recommended action derived from the deterministic verdict.">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sel.visible.map((c, i) => (
-                <ContactRow key={i} contact={c} onOpen={sel.setSelected} />
-              ))}
-            </tbody>
-          </table>
+          <p className="muted" style={{ margin: '0 0 10px', fontSize: 12 }}>
+            {sel.total.toLocaleString()} contact{sel.total === 1 ? '' : 's'}
+            {sel.filter !== 'all' ? ` · filtered by ${sel.filter}` : ''}
+          </p>
+          <div className="table-scroll">
+            <table className="contact-table">
+              <thead>
+                <tr>
+                  <th scope="col">Email</th>
+                  <th scope="col" title="Deterministic verification engine — the actual verdict, never guessed.">
+                    Verdict <span className="pill" style={{ fontSize: 9, padding: '1px 6px' }}>RULES</span>
+                  </th>
+                  <th scope="col" title="How reliable the verdict is. Uses a trained ML model when one is deployed; otherwise the engine's own rule-based confidence. Never changes the verdict.">
+                    Confidence
+                  </th>
+                  <th scope="col">Risk signals</th>
+                  <th scope="col" title="Recommended action derived from the deterministic verdict.">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sel.visible.map((c, i) => (
+                  <ContactRow key={i} contact={c} onOpen={sel.setSelected} />
+                ))}
+              </tbody>
+            </table>
+          </div>
           {sel.capped && (
             <p className="muted" style={{ marginTop: 10 }}>
               Showing first {sel.cap} of {sel.total}. Export for the full list.

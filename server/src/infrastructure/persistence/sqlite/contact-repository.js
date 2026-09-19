@@ -119,6 +119,24 @@ export class SqliteContactRepository extends ContactRepository {
     run(items);
   }
 
+  // The contact's currently stored verdict (for verdict-stability on reverify).
+  // Returns a lightweight object with the fields chooseStableVerdict needs, or
+  // null if the contact has never been verified.
+  findVerdict(contactId) {
+    const row = this.db.prepare(
+      `SELECT deliverability, confidence, status, verified_at FROM contacts WHERE id = ?`
+    ).get(contactId);
+    if (!row || !row.verified_at) return null;
+    return { deliverability: row.deliverability, confidence: row.confidence, status: row.status };
+  }
+
+  // Refresh only the verification timestamp (used when a reverify keeps the
+  // prior verdict — we still record that it was checked, without downgrading).
+  touchVerified(contactId, when) {
+    this.db.prepare('UPDATE contacts SET verified_at = ? WHERE id = ?')
+      .run(when || new Date().toISOString(), contactId);
+  }
+
   resetVerification(listId) {
     this.db.prepare('UPDATE contacts SET verified_at = NULL WHERE list_id = ?').run(listId);
   }

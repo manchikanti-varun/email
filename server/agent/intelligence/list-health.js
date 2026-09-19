@@ -29,14 +29,14 @@
 //   noMx            × 0.60   no dedicated mail servers (less reliable)
 //   unknown         × 0.15   NEUTRAL/unconfirmed — small confidence penalty only
 //   roleBased       × 0.10   a characteristic, not a defect (tiny nudge)
-//   acceptAll       × 0.10   positive infra signal; only a small confidence cost
+//   acceptAll       × 0.00   positive infra signal; never reduces health
 //
 // Rationale (matches existing engine semantics):
 //   * Only definitive negatives are penalised heavily.
 //   * "Lack of evidence is never negative evidence": UNKNOWN barely moves the
 //     score (0.15) and is framed as a confidence cost, not a failure.
-//   * ACCEPT_ALL is a healthy-infrastructure signal, so it costs almost nothing
-//     (0.10) and is NEVER treated as undeliverable.
+//   * ACCEPT_ALL is a healthy-infrastructure signal, so it costs nothing
+//     (0.00) and is NEVER treated as undeliverable.
 //   * The weighted risk is capped so a fully-bad list floors at 0, not below.
 //
 // The weights live in HEALTH_WEIGHTS and can be tuned without touching logic.
@@ -54,7 +54,9 @@ export const HEALTH_WEIGHTS = Object.freeze({
   noMx: 0.6,
   unknown: 0.15,
   roleBased: 0.1,
-  acceptAll: 0.1,
+  // Catch-all is a POSITIVE mail-infrastructure signal. It must NOT reduce
+  // health (the product treats it as accepted/eligible), so its weight is 0.
+  acceptAll: 0,
 });
 
 // ---- Health-level thresholds + labels (product labels, configurable) -------

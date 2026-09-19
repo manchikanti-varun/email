@@ -4,7 +4,6 @@ import type { Contact, RiskSignal } from '../../../types';
 import {
   ActionBadge,
   DeliverabilityLabel,
-  ConfidenceLabel,
   CalibratedBadge,
 } from '../../../components/domain';
 import { deterministicConfidence } from '../../../lib/format';
@@ -58,9 +57,6 @@ export function ContactRow({ contact, onOpen }: { contact: Contact; onOpen: (c: 
         <span className="muted" style={{ fontSize: 11 }}> · {contact.deliverabilityScore ?? contact.score ?? '—'}</span>
       </td>
       <td data-label="Confidence">
-        <ConfidenceLabel value={contact.confidence} />
-      </td>
-      <td data-label="Confidence %">
         <AiConfidenceCell contact={contact} />
       </td>
       <td data-label="Risk signals">

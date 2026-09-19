@@ -1,9 +1,31 @@
 // Aggregate list-level metrics: overall health score + supporting metrics.
 // Pure domain logic — no I/O.
 //
-// Health is derived from actual positive/negative evidence (per-contact scores),
-// NOT from Safe/Total. Catch-all and unknown do not apply major penalties;
-// only strong negatives (remove / disposable / no-MX) pull health down.
+// SINGLE SOURCE OF TRUTH FOR HEALTH:
+// The overall `health` score uses the SAME weighted-risk model as
+// buildListHealth() (server/agent/intelligence/list-health.js):
+//
+//   health = clamp(0..100, 100 − Σ(signalPercentage × weight))
+//
+// Previously this function used a different formula (a blend of the mean
+// per-contact score, a deliverability metric and a domain-health metric).
+// That produced a DIFFERENT number from the "AI List Diagnosis" panel for the
+// same list (e.g. 93.4 vs 88.7). Both were deterministic but simply different
+// definitions. They are now unified so every panel and the history snapshot
+// show one consistent score. If you tune weights, tune HEALTH_WEIGHTS below and
+// keep it in sync with list-health.js (or import from a shared module).
+
+// Weighted-risk model weights — MUST match HEALTH_WEIGHTS in list-health.js.
+const HEALTH_WEIGHTS = Object.freeze({
+  undeliverable: 1.0,
+  syntaxInvalid: 1.0,
+  domainInvalid: 1.0,
+  disposable: 0.9,
+  noMx: 0.6,
+  unknown: 0.15,
+  roleBased: 0.1,
+  acceptAll: 0, // catch-all is positive infra; never reduces health
+});
 
 export function summarize(contacts) {
   const total = contacts.length;
@@ -16,6 +38,8 @@ export function summarize(contacts) {
   let role = 0;
   let catchAll = 0;
   let noMx = 0;
+  let syntaxInvalid = 0;
+  let domainInvalid = 0;
 
   for (const c of contacts) {
     counts[c.classification] = (counts[c.classification] || 0) + 1;
@@ -29,6 +53,8 @@ export function summarize(contacts) {
     if (codes.has('role_based')) role++;
     if (codes.has('catch_all')) catchAll++;
     if (codes.has('no_mx')) noMx++;
+    if (codes.has('domain_missing') || c.finalReason === 'domain_missing') domainInvalid++;
+    if (c.finalReason === 'invalid_syntax' || c.finalReason === 'reserved_domain') syntaxInvalid++;
   }
 
   const pct = (n) => (total ? Math.round((n / total) * 1000) / 10 : 0);
@@ -55,12 +81,32 @@ export function summarize(contacts) {
     ? Math.round(((total - noMx - disposable) / total) * 100)
     : 0;
 
-  // Primary health = mean per-contact evidence score (catch-all scores 100,
-  // unknown ~80, remove ~5). Do NOT use Safe/Total.
+  // Retained for context/telemetry only — NOT the health score any more.
   const avgScore = total ? scoreSum / total : 0;
-  const health = Math.round(
-    (avgScore * 0.75 + deliverabilityMetric * 0.15 + domainHealth * 0.1) * 10
-  ) / 10;
+
+  // Primary health = weighted-risk model, identical to buildListHealth().
+  // Each share is a percentage of the whole list (0..100).
+  const undeliverable = statusCounts.undeliverable || 0;
+  const acceptAll = statusCounts.accepted || 0;
+  const unknownCount = counts.unknown || 0;
+  const share = {
+    undeliverable: pct(undeliverable),
+    syntaxInvalid: pct(syntaxInvalid),
+    domainInvalid: pct(domainInvalid),
+    disposable: pct(disposable),
+    noMx: pct(noMx),
+    unknown: pct(unknownCount),
+    roleBased: pct(role),
+    acceptAll: pct(acceptAll),
+  };
+  const weightedRisk = Object.entries(HEALTH_WEIGHTS).reduce(
+    (sum, [key, weight]) => sum + (share[key] ?? 0) * weight,
+    0,
+  );
+  // Empty list => neutral 100 (nothing bad observed).
+  const health = total === 0
+    ? 100
+    : Math.round(clamp(100 - weightedRisk) * 10) / 10;
 
   return {
     total,

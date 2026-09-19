@@ -170,6 +170,10 @@ button { font-family: inherit; cursor: pointer; }
 .dropzone strong { color: var(--text); }
 
 /* ---------- Table ---------- */
+/* Horizontal scroll wrapper so wide tables never overflow their card on
+   narrow viewports (was causing the contacts table to run off-screen). */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll .contact-table { min-width: 620px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
 th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
