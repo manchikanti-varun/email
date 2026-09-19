@@ -12,10 +12,10 @@ export function ListHealthSummary({ summary }: { summary: ListSummary }) {
       <div className="ring-wrap">
         <ScoreRing score={summary.health} label="out of 100" />
         <div style={{ flex: 1 }}>
-          <MetricBar label="Deliverability" value={m.deliverability} color="var(--safe)" />
-          <MetricBar label="Data quality" value={m.dataQuality} color="var(--brand)" />
-          <MetricBar label="Risk" value={m.risk} color="var(--review)" />
-          <MetricBar label="Domain health" value={m.domainHealth} color="var(--brand-2)" />
+          <MetricBar label="Confirmed deliverable" value={m.deliverability} color="var(--safe)" />
+          <MetricBar label="Catch-all (unconfirmed)" value={m.catchAllAcceptance ?? 0} color="var(--catchall)" />
+          <MetricBar label="Could not verify" value={m.unconfirmed ?? 0} color="var(--unknown)" />
+          <MetricBar label="Domain infrastructure" value={m.domainHealth} color="var(--brand-2)" />
         </div>
       </div>
       <div style={{ marginTop: 14 }}>

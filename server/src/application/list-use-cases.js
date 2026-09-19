@@ -3,6 +3,7 @@
 // here; the interface layer only maps HTTP <-> these calls.
 import { nanoid } from 'nanoid';
 import { AppError } from './errors.js';
+import { resolveVerdict, VERDICT } from '../domain/verification/verdict-semantics.js';
 
 export class UploadList {
   constructor({ lists, contacts, parseUpload }) {
@@ -129,22 +130,24 @@ export class GetCleaningPlan {
     if (!list) throw new AppError(404, 'List not found');
 
     const contacts = this.contacts.findByList(list.id);
-    const plan = { keep: [], review: [], remove: [] };
+    // Canonical semantics: keep = CONFIRMED deliverable only. Catch-all and
+    // unknown are NOT campaign-ready — catch-all → review, unknown → reverify.
+    const plan = { keep: [], review: [], reverify: [], remove: [] };
     for (const c of contacts) {
-      const catchAll = c.acceptanceType === 'CATCH_ALL'
-        || c.mailboxStatus === 'ACCEPT_ALL'
-        || c.status === 'accepted'
-        || c.deliverability === 'accepted'
-        || (Array.isArray(c.riskSignals) && c.riskSignals.some((r) => r?.code === 'catch_all'));
-      // Catch-all is campaign-eligible even if an older row still says review.
-      if (c.classification === 'safe' || catchAll) plan.keep.push(c.email);
-      else if (c.classification === 'remove') plan.remove.push(c.email);
-      else plan.review.push(c.email); // true review + unknown
+      switch (resolveVerdict(c)) {
+        case VERDICT.DELIVERABLE: plan.keep.push(c.email); break;
+        case VERDICT.UNDELIVERABLE: plan.remove.push(c.email); break;
+        case VERDICT.UNKNOWN: plan.reverify.push(c.email); break;
+        // ACCEPT_ALL + RISKY → review (mailbox unconfirmed / conflicting evidence).
+        default: plan.review.push(c.email); break;
+      }
     }
     return {
       keep: plan.keep.length,
       review: plan.review.length,
+      reverify: plan.reverify.length,
       remove: plan.remove.length,
+      // Campaign-ready = CONFIRMED only (proven mailbox-level deliverability).
       campaignReady: plan.keep.length,
       plan,
     };
@@ -152,6 +155,16 @@ export class GetCleaningPlan {
 }
 
 // Returns the list + filtered contact rows; the interface layer formats CSV/XLSX.
+//
+// CANONICAL EXPORT SEMANTICS (see domain/verification/verdict-semantics.js):
+//   'campaign' / 'confirmed' — CONFIRMED (deliverable) ONLY. This is the safe
+//        send list; it MUST NOT silently include catch-all or unknown.
+//   'safe'                   — classification 'safe' (== confirmed deliverable).
+//   'catchall'               — explicit catch-all export (opt-in, clearly named).
+//   'sendlist-extended'      — explicit broader policy: confirmed + catch-all
+//        (a deliberate user choice, never the default).
+//   'review'|'remove'|'unknown' — by classification bucket.
+//   'all'                    — everything.
 export class GetExportData {
   constructor({ lists, contacts }) { this.lists = lists; this.contacts = contacts; }
 
@@ -160,13 +173,18 @@ export class GetExportData {
     if (!list) throw new AppError(404, 'List not found');
 
     let contacts = this.contacts.findByList(list.id);
-    if (filter === 'campaign') {
+    const verdict = (c) => resolveVerdict(c);
+
+    if (filter === 'campaign' || filter === 'confirmed') {
+      // CONFIRMED only — proven mailbox-level deliverability. No catch-all, no unknown.
+      contacts = contacts.filter((c) => verdict(c) === VERDICT.DELIVERABLE);
+    } else if (filter === 'catchall') {
+      contacts = contacts.filter((c) => verdict(c) === VERDICT.ACCEPT_ALL);
+    } else if (filter === 'sendlist-extended') {
+      // Explicit opt-in broader policy: confirmed + catch-all (mailbox unproven).
       contacts = contacts.filter((c) => {
-        if (c.classification === 'safe') return true;
-        // Catch-all accepted = campaign-eligible
-        if (c.acceptanceType === 'CATCH_ALL' || c.mailboxStatus === 'ACCEPT_ALL') return true;
-        if (c.status === 'accepted' || c.deliverability === 'accepted') return true;
-        return Array.isArray(c.riskSignals) && c.riskSignals.some((r) => r?.code === 'catch_all');
+        const v = verdict(c);
+        return v === VERDICT.DELIVERABLE || v === VERDICT.ACCEPT_ALL;
       });
     } else if (['safe', 'review', 'remove', 'unknown'].includes(filter)) {
       contacts = contacts.filter((c) => c.classification === filter);

@@ -21,6 +21,8 @@ export const DIAGNOSIS_SYSTEM_PROMPT = [
   '- never recommend sending to addresses classified as undeliverable',
   '- treat UNKNOWN as unconfirmed/neutral (a timeout or transport limitation), NOT as invalid',
   '- treat ACCEPT_ALL as a healthy-infrastructure signal where the exact mailbox cannot be independently confirmed, NOT as simply deliverable and NOT as a failure',
+  '- use PRECISE terminology. "deliverable" means confirmed mailbox-level SMTP evidence ONLY. Never call the list\'s deliverability "high" when the deliverable percentage is low. Prefer phrasing like "X% received positive mailbox-level SMTP evidence", "Y% could not be conclusively verified", "Z% are on catch-all domains where mailbox existence cannot be independently confirmed".',
+  '- never sum deliverable + accept-all + unknown into a single "deliverability" figure',
   '- clearly state when evidence is insufficient',
   '- give practical, prioritized cleanup recommendations grounded in the evidence',
   '',
@@ -143,10 +145,12 @@ export function fallbackDiagnosis(report) {
   const summary = m.total === 0
     ? 'This list has no verified contacts yet, so no health diagnosis is available. Verify the list to generate a report.'
     : `List health is ${report.healthScore}/100 (${report.healthLevel}). `
-      + `${p.deliverable}% deliverable, ${p.undeliverable}% undeliverable, `
-      + `${p.unknown}% unknown, ${p.acceptAll}% accept-all. `
+      + `${p.deliverable}% of addresses received positive mailbox-level SMTP evidence (deliverable). `
+      + `${p.unknown}% could not be conclusively verified (unknown). `
+      + `${p.acceptAll}% are on catch-all domains, where mailbox existence cannot be independently confirmed. `
+      + `${p.undeliverable}% have definitive negative evidence (undeliverable). `
       + (m.undeliverable > 0
-        ? `The largest actionable issue is removing ${m.undeliverable} undeliverable addresses before your next campaign.`
+        ? `The clearest action is removing the ${m.undeliverable} undeliverable addresses before your next campaign.`
         : 'No definitive undeliverable addresses were found.');
 
   const keyIssues = (report.riskSignals || [])
@@ -177,10 +181,14 @@ export function fallbackDiagnosis(report) {
     }
   }
   if (m.acceptAll > 0) {
-    observations.push(`${m.acceptAll} accept-all addresses reflect healthy mail infrastructure where the exact mailbox cannot be independently confirmed.`);
+    observations.push(`${m.acceptAll} catch-all addresses are on domains that accept arbitrary recipients; mailbox existence cannot be independently confirmed, so they are marked for review rather than confirmed deliverable.`);
   }
   if (m.unknown > 0) {
     observations.push(`${m.unknown} unknown results are unconfirmed (not invalid) and can be re-verified later.`);
+  }
+  const infra = m.additionalSignals && m.additionalSignals.infraUnknown;
+  if (infra && infra > 0) {
+    observations.push(`${infra} of the unknown results are associated with SMTP transport timeouts or mail servers not completing a handshake, which may reflect verification infrastructure limitations rather than mailbox invalidity.`);
   }
 
   return { summary, keyIssues, recommendations, observations };

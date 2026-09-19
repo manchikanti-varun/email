@@ -32,11 +32,12 @@ export const ACTION_STYLE: Record<string, { label: string; color: string }> = {
 
 export const DELIV_STYLE: Record<string, { label: string; color: string }> = {
   deliverable: { label: 'Deliverable', color: 'var(--safe)' },
-  // Catch-all → ACCEPTED (positive, campaign-eligible).
-  accepted: { label: 'Accepted · catch-all', color: 'var(--safe)' },
+  // Catch-all: server accepts arbitrary recipients — mailbox NOT confirmed.
+  // Labelled explicitly so it is never mistaken for confirmed deliverability.
+  accepted: { label: 'Catch-All · unconfirmed', color: 'var(--catchall)' },
   // Legacy rows may still say risky for catch-all until re-verified.
-  risky: { label: 'Accepted · catch-all', color: 'var(--safe)' },
-  unknown: { label: 'Unconfirmed', color: 'var(--unknown)' },
+  risky: { label: 'Catch-All · unconfirmed', color: 'var(--catchall)' },
+  unknown: { label: 'Unknown · unconfirmed', color: 'var(--unknown)' },
   undeliverable: { label: 'Undeliverable', color: 'var(--remove)' },
 };
 

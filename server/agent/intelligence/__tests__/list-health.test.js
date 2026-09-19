@@ -121,14 +121,19 @@ test('score is deterministic (same input -> same score)', () => {
 });
 
 // ---- UNKNOWN barely penalised (never treated as negative) ------------------
-test('a list dominated by UNKNOWN stays healthy (unknown is neutral)', () => {
+test('a list dominated by UNKNOWN is meaningfully penalised, but NOT treated as invalid', () => {
   const contacts = Array.from({ length: 100 }, (_, i) => contact(`u${i}@slow.example`, 'unknown'));
   const r = buildListHealth({ contacts });
-  // 100% unknown * 0.15 = 15 penalty => score 85 (Good), NOT Critical.
-  assert.equal(r.healthScore, 85);
-  assert.equal(r.healthLevel, 'Good');
+  // Canonical model: 100% unknown * 0.35 = 35 penalty => score 65
+  // ("Needs Attention"). Uncertainty has meaningful impact, but a fully-unknown
+  // list is NOT Critical (unknown is inconclusive, not undeliverable).
+  assert.equal(r.healthScore, 65);
+  assert.equal(r.healthLevel, 'Needs Attention');
   const unknownSig = r.riskSignals.find((s) => s.code === 'unknown');
   assert.equal(unknownSig.severity, 'low');
+  // And it must be far healthier than a fully-undeliverable list (score 0).
+  const dead = buildListHealth({ contacts: Array.from({ length: 100 }, (_, i) => contact(`x${i}@dead.example`, 'undeliverable')) });
+  assert.ok(r.healthScore > dead.healthScore + 40);
 });
 
 // ---- ACCEPT_ALL framed as infra signal, not undeliverable ------------------

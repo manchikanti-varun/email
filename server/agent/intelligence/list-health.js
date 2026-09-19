@@ -44,35 +44,12 @@
 // what it is.
 import { pct, round1, clampScore } from './common.js';
 import { listStatistics, domainStatistics } from './statistics.js';
+// Canonical scoring model — SHARED with health.summarize() so the score can
+// never diverge between the two aggregation stacks. Weights now penalise
+// UNKNOWN (0.35) and ACCEPT_ALL (0.25) as meaningful uncertainty.
+import { HEALTH_WEIGHTS, HEALTH_LEVELS, healthLevel } from '../../src/domain/verification/health-weights.js';
 
-// ---- Configurable scoring weights (share-of-list, 0..1) --------------------
-export const HEALTH_WEIGHTS = Object.freeze({
-  undeliverable: 1.0,
-  syntaxInvalid: 1.0,
-  domainInvalid: 1.0,
-  disposable: 0.9,
-  noMx: 0.6,
-  unknown: 0.15,
-  roleBased: 0.1,
-  // Catch-all is a POSITIVE mail-infrastructure signal. It must NOT reduce
-  // health (the product treats it as accepted/eligible), so its weight is 0.
-  acceptAll: 0,
-});
-
-// ---- Health-level thresholds + labels (product labels, configurable) -------
-export const HEALTH_LEVELS = Object.freeze([
-  { min: 90, level: 'Excellent' },
-  { min: 75, level: 'Good' },
-  { min: 60, level: 'Needs Attention' },
-  { min: 40, level: 'Poor' },
-  { min: 0, level: 'Critical' },
-]);
-
-export function healthLevel(score) {
-  const s = clampScore(score);
-  for (const t of HEALTH_LEVELS) if (s >= t.min) return t.level;
-  return 'Critical';
-}
+export { HEALTH_WEIGHTS, HEALTH_LEVELS, healthLevel };
 
 // ---- Provider / domain-family classification (extensible) ------------------
 // A small, extensible mapping. Anything not matched is 'corporate/other'. This
@@ -105,6 +82,14 @@ export function classifyProvider(domain, { disposable = false } = {}) {
 function countAdditionalSignals(contacts) {
   let syntaxInvalid = 0;
   let domainInvalid = 0;
+  // infraUnknown = UNKNOWN results whose cause is an SMTP transport / worker /
+  // timeout limitation (as opposed to, say, a healthy server we just could not
+  // finish probing). Used to surface a "verification infrastructure limitation"
+  // signal WITHOUT claiming the addresses are invalid.
+  let infraUnknown = 0;
+  const INFRA_REASONS = new Set([
+    'all_mx_unreachable', 'smtp_unavailable', 'transport_or_network_failure',
+  ]);
   for (const c of contacts || []) {
     const rs = Array.isArray(c.riskSignals) ? c.riskSignals : [];
     const sigs = Array.isArray(c.signals) ? c.signals : [];
@@ -115,8 +100,18 @@ function countAdditionalSignals(contacts) {
     // OR a reserved/documentation domain (also cannot receive mail).
     const syntaxFail = sigs.some((s) => s && s.status === 'fail' && /invalid syntax/i.test(s.label || ''));
     if (syntaxFail || c.finalReason === 'invalid_syntax' || c.finalReason === 'reserved_domain') syntaxInvalid++;
+
+    const verdict = c.deliverability || c.status;
+    if (verdict === 'unknown') {
+      const reason = c.finalReason
+        || (c.smtpEvidence && c.smtpEvidence.finalReason)
+        || null;
+      const src = c.smtpSource || (c.smtpEvidence && c.smtpEvidence.vantages
+        && c.smtpEvidence.vantages[0] && c.smtpEvidence.vantages[0].source);
+      if ((reason && INFRA_REASONS.has(reason)) || src === 'none') infraUnknown++;
+    }
   }
-  return { syntaxInvalid, domainInvalid };
+  return { syntaxInvalid, domainInvalid, infraUnknown };
 }
 
 /**
@@ -162,6 +157,7 @@ export function buildListHealth({ contacts, summary = null, domainLimit = 10 } =
       noMx: stats.risk.no_mx,
       syntaxInvalid: extra.syntaxInvalid,
       domainInvalid: extra.domainInvalid,
+      infraUnknown: extra.infraUnknown,
       greylisted: stats.greylisted,
     },
   };
@@ -268,6 +264,25 @@ function buildRiskSignals({ total, metrics }) {
   push('unknown', 'low', metrics.unknown, p.unknown,
     'Unknown / unconfirmed results',
     'SMTP evidence was inconclusive (timeout, temporary failure, or transport limitation). These are candidates for later re-verification — not invalid.');
+  // Verification-infrastructure limitation: a large share of UNKNOWN driven by
+  // transport/worker/timeout failures. Flagged so a high UNKNOWN count is NOT
+  // silently hidden behind a healthy-looking score. We describe the correlation
+  // without asserting it is definitely the cause.
+  {
+    const infra = a.infraUnknown || 0;
+    const infraPct = pct(infra, total);
+    // Only surface when it is a meaningful share (>= 15% of the whole list).
+    const severity = infraPct >= 40 ? 'medium' : 'low';
+    if (infra > 0 && infraPct >= 15) {
+      push('verification_infrastructure_limitation', severity, infra, infraPct,
+        'Verification infrastructure limitation',
+        `${infra} addresses could not be conclusively verified, and their results ` +
+        'are associated with SMTP transport timeouts / mail servers not completing a ' +
+        'handshake from this verifier. This may reflect verification infrastructure ' +
+        'limitations (e.g. outbound SMTP restrictions) rather than mailbox invalidity. ' +
+        'Re-verify where live SMTP is available.');
+    }
+  }
   push('role_based', 'low', a.roleBased, pct(a.roleBased, total),
     'Role / shared mailboxes',
     'Functional addresses (e.g. info@, support@). Deliverable but may not suit person-level campaigns.');

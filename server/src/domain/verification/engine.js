@@ -35,6 +35,7 @@ import {
   toMailboxStatus,
   toVerificationQuality,
 } from './smtp-classify.js';
+import { classificationFor as canonicalClassificationFor } from './verdict-semantics.js';
 
 function evidence(status, label) { return { status, label }; }
 function risk(code, label, detail) { return { code, label, detail }; }
@@ -398,8 +399,10 @@ function scoreDeliverability(f, deliverability) {
 function recommendAction({ deliverability, facts }) {
   if (deliverability === DELIVERABILITY.UNDELIVERABLE) return ACTION.REMOVE;
   if (deliverability === DELIVERABILITY.DELIVERABLE) return ACTION.KEEP;
-  // Catch-all is campaign-eligible (KEEP → classification safe).
-  if (deliverability === DELIVERABILITY.ACCEPTED) return ACTION.KEEP;
+  // Catch-all (ACCEPTED) is NOT confirmed mailbox existence. The server accepts
+  // arbitrary recipients, so the specific mailbox cannot be independently
+  // proven. It is REVIEW (human decision), never an automatic KEEP/Safe.
+  if (deliverability === DELIVERABILITY.ACCEPTED) return ACTION.REVIEW;
   if (facts.smtpUnavailable || facts.greylisted) return ACTION.REVERIFY;
   return ACTION.REVIEW;
 }
@@ -492,10 +495,6 @@ function recommendationText({ recommendedAction, facts, mailboxStatus }) {
     case ACTION.REMOVE:
       return 'REMOVE — strong technical evidence this address cannot receive mail.';
     case ACTION.KEEP:
-      if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll) {
-        return 'KEEP — Accepted by a catch-all mail server. Individual mailbox existence ' +
-          'cannot be independently confirmed.';
-      }
       return facts.role
         ? 'KEEP — deliverable. Note: this is a shared/role mailbox; confirm it suits your campaign.'
         : 'KEEP — deliverable with high confidence.';
@@ -504,6 +503,11 @@ function recommendationText({ recommendedAction, facts, mailboxStatus }) {
              'Re-check where live SMTP verification is available. This is unconfirmed, not invalid.';
     case ACTION.REVIEW:
     default:
+      if (mailboxStatus === MAILBOX_STATUS.ACCEPT_ALL || facts.catchAll) {
+        return 'REVIEW — Accepted by a catch-all mail server. The domain accepts arbitrary ' +
+          'recipients, so this specific mailbox cannot be independently confirmed. A human ' +
+          'decision is recommended before sending.';
+      }
       return 'REVIEW — evidence indicates real risk or conflicting signals; a human decision is recommended.';
   }
 }
@@ -528,8 +532,16 @@ function finalize(email, r) {
 
     // ---- Backward-compatible derived fields ----
     score: r.deliverabilityScore,
-    // KEEP → safe (campaign-eligible), including catch-all ACCEPTED.
-    classification: mapAction(r.recommendedAction),
+    // Classification is derived from the CANONICAL verdict semantics (single
+    // source of truth), NOT re-derived from the action here. This guarantees
+    // catch-all → 'review' (not 'safe') everywhere. See verdict-semantics.js.
+    classification: canonicalClassificationFor({
+      deliverability: r.deliverability,
+      status: r.deliverability,
+      acceptanceType: r.acceptanceType,
+      mailboxStatus: r.mailboxStatus,
+      riskSignals: r.riskSignals,
+    }),
     status: r.deliverability,
     signals: r.evidence || [],
     greylisted: r.greylisted || false,
@@ -541,12 +553,6 @@ function finalize(email, r) {
   };
 }
 
-function mapAction(action) {
-  switch (action) {
-    case ACTION.KEEP: return 'safe';
-    case ACTION.REMOVE: return 'remove';
-    case ACTION.REVERIFY: return 'unknown';
-    case ACTION.REVIEW:
-    default: return 'review';
-  }
-}
+// NOTE: classification is now derived from the canonical verdict-semantics
+// module (see finalize → canonicalClassificationFor), not from the action.
+// The former mapAction() helper was removed to keep ONE source of truth.

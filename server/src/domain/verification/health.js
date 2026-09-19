@@ -12,20 +12,10 @@
 // That produced a DIFFERENT number from the "AI List Diagnosis" panel for the
 // same list (e.g. 93.4 vs 88.7). Both were deterministic but simply different
 // definitions. They are now unified so every panel and the history snapshot
-// show one consistent score. If you tune weights, tune HEALTH_WEIGHTS below and
-// keep it in sync with list-health.js (or import from a shared module).
-
-// Weighted-risk model weights — MUST match HEALTH_WEIGHTS in list-health.js.
-const HEALTH_WEIGHTS = Object.freeze({
-  undeliverable: 1.0,
-  syntaxInvalid: 1.0,
-  domainInvalid: 1.0,
-  disposable: 0.9,
-  noMx: 0.6,
-  unknown: 0.15,
-  roleBased: 0.1,
-  acceptAll: 0, // catch-all is positive infra; never reduces health
-});
+// show one consistent score. Weights live in the shared health-weights.js
+// module so this function and buildListHealth() can never diverge.
+import { HEALTH_WEIGHTS } from './health-weights.js';
+import { tallyVerdicts } from './verdict-semantics.js';
 
 export function summarize(contacts) {
   const total = contacts.length;
@@ -33,7 +23,6 @@ export function summarize(contacts) {
   const statusCounts = {
     deliverable: 0, accepted: 0, undeliverable: 0, risky: 0, unknown: 0,
   };
-  let scoreSum = 0;
   let disposable = 0;
   let role = 0;
   let catchAll = 0;
@@ -45,7 +34,6 @@ export function summarize(contacts) {
     counts[c.classification] = (counts[c.classification] || 0) + 1;
     const st = c.status || c.deliverability || 'unknown';
     statusCounts[st] = (statusCounts[st] || 0) + 1;
-    scoreSum += Number(c.score) || 0;
 
     const rsigs = Array.isArray(c.riskSignals) ? c.riskSignals : safeParse(c.risk_signals);
     const codes = new Set(rsigs.map((r) => r.code));
@@ -59,36 +47,41 @@ export function summarize(contacts) {
 
   const pct = (n) => (total ? Math.round((n / total) * 1000) / 10 : 0);
 
-  // Positive/neutral share: everything except definitive removes.
-  // Catch-all and unknown do not reduce this metric.
-  const positiveOrNeutral = total - counts.remove;
-  const deliverabilityMetric = total
-    ? Math.round((positiveOrNeutral / total) * 100)
-    : 0;
+  // Canonical bucket + verdict tally — the ONE source of truth for counts.
+  // This guarantees Cleaning Summary counts match every other consumer:
+  // catch-all → review (NOT safe), unknown stays its own bucket.
+  const canon = tallyVerdicts(contacts);
+  // Overwrite the raw classification counts with the canonical buckets so a
+  // stale/legacy classification on an old row cannot desync the summary.
+  counts.safe = canon.cleaning.safe;
+  counts.review = canon.cleaning.review;
+  counts.remove = canon.cleaning.remove;
+  counts.unknown = canon.cleaning.unknown;
 
-  const dataQuality = total
-    ? Math.round(((total - counts.remove) / total) * 100)
-    : 0;
+  const deliverable = canon.verdicts.deliverable;
+  const undeliverable = canon.verdicts.undeliverable;
+  const acceptAll = canon.verdicts.acceptAll;
+  const unknownCount = canon.verdicts.unknown;
 
-  // Risk health: only real defects. Unknown is neutral (no major penalty).
-  // Catch-all must not reduce this metric.
-  const trueRiskReview = Math.max(0, counts.review); // catch-all no longer lands in review
-  const risk = total
-    ? Math.round(((total - counts.remove - trueRiskReview * 0.5) / total) * 100)
-    : 0;
-
+  // PRECISE, HONESTLY-NAMED METRICS (no more "(total − remove)/total = 99%").
+  //
+  // mailboxDeliverability = confirmed mailbox-level positive evidence only.
+  //   For the 291 fixture this is 98/291 ≈ 33.7% — NOT 99%.
+  const mailboxDeliverability = total ? Math.round((deliverable / total) * 100) : 0;
+  // Infrastructure acceptance (catch-all): server accepted, mailbox unconfirmed.
+  const catchAllAcceptance = total ? Math.round((acceptAll / total) * 100) : 0;
+  // Share we could not conclusively verify (unknown).
+  const unconfirmed = total ? Math.round((unknownCount / total) * 100) : 0;
+  // Data quality = share with NO definitive hard failure (remove).
+  const dataQuality = total ? Math.round(((total - counts.remove) / total) * 100) : 0;
+  // Domain / infrastructure health = MX present, not disposable. This is an
+  // INFRASTRUCTURE metric and must never be read as mailbox deliverability.
   const domainHealth = total
     ? Math.round(((total - noMx - disposable) / total) * 100)
     : 0;
 
-  // Retained for context/telemetry only — NOT the health score any more.
-  const avgScore = total ? scoreSum / total : 0;
-
   // Primary health = weighted-risk model, identical to buildListHealth().
   // Each share is a percentage of the whole list (0..100).
-  const undeliverable = statusCounts.undeliverable || 0;
-  const acceptAll = statusCounts.accepted || 0;
-  const unknownCount = counts.unknown || 0;
   const share = {
     undeliverable: pct(undeliverable),
     syntaxInvalid: pct(syntaxInvalid),
@@ -112,18 +105,31 @@ export function summarize(contacts) {
     total,
     counts,
     statusCounts,
+    // Canonical verdict counts + campaign eligibility, exposed for every UI.
+    verdicts: canon.verdicts,
+    eligibility: canon.eligibility,
+    confirmedEligible: canon.confirmedEligible,
     percentages: {
       safe: pct(counts.safe),
       review: pct(counts.review),
       remove: pct(counts.remove),
       unknown: pct(counts.unknown),
-      accepted: pct(statusCounts.accepted || 0),
-      catchAll: pct(catchAll),
+      // Precise verdict shares (mailbox-level).
+      deliverable: canon.percentages.deliverable,
+      undeliverable: canon.percentages.undeliverable,
+      acceptAll: canon.percentages.acceptAll,
+      accepted: canon.percentages.acceptAll, // backward-compatible alias
+      catchAll: canon.percentages.acceptAll,
+      unknownVerdict: canon.percentages.unknown,
     },
     metrics: {
-      deliverability: clamp(deliverabilityMetric),
+      // RENAMED for honesty. `deliverability` now means CONFIRMED mailbox-level
+      // deliverability (deliverable/total), not "everything except removes".
+      deliverability: clamp(mailboxDeliverability),
+      mailboxDeliverability: clamp(mailboxDeliverability),
+      catchAllAcceptance: clamp(catchAllAcceptance),
+      unconfirmed: clamp(unconfirmed),
       dataQuality: clamp(dataQuality),
-      risk: clamp(risk),
       domainHealth: clamp(domainHealth),
     },
     breakdown: { disposable, role, catchAll, noMx },

@@ -37,24 +37,29 @@ export function PreflightCard({ id }: { id: string }) {
           </div>
           <div className="grid cols-2">
             <div>
-              {bar('Safe', p.buckets.safe, 'var(--safe)')}
-              {bar('Review', p.buckets.review, 'var(--review)')}
-              {bar('Accepted (catch-all)', p.buckets.catchAll, 'var(--safe)')}
-              {bar('Invalid', p.buckets.invalid, 'var(--remove)')}
-              {bar('Disposable', p.buckets.disposable, 'var(--remove)')}
-              {bar('Unknown', p.buckets.unknown, 'var(--unknown)')}
+              {bar('Confirmed', p.buckets.confirmed, 'var(--safe)')}
+              {bar('Review — Catch-All', p.buckets.catchAll, 'var(--catchall)')}
+              {bar('Unconfirmed — Unknown', p.buckets.unknown, 'var(--unknown)')}
+              {bar('Blocked — Undeliverable', p.buckets.blocked, 'var(--remove)')}
             </div>
             <div>
-              <div className="stat-label">Recommended send list</div>
+              <div className="stat-label" title="Confirmed mailbox-level deliverable recipients only. Catch-all and unknown are NOT included — their mailbox existence is not independently confirmed.">
+                Recommended send list (confirmed)
+              </div>
               <div className="stat" style={{ color: 'var(--safe)' }}>{p.recommendedSendList.toLocaleString()}</div>
               <div className="recommendation" style={{ marginTop: 12 }}>
                 <b>Can I safely send this campaign?</b>
                 <br />
                 {p.verdict}
               </div>
-              <a className="btn sm" style={{ marginTop: 12 }} href={listsApi.exportUrl(id, 'campaign')}>
-                Download send list
+              <a className="btn sm" style={{ marginTop: 12 }} href={listsApi.exportUrl(id, 'confirmed')}>
+                Download confirmed send list
               </a>
+              {p.buckets.catchAll > 0 && (
+                <a className="btn ghost sm" style={{ marginTop: 8 }} href={listsApi.exportUrl(id, 'catchall')}>
+                  Export catch-all separately
+                </a>
+              )}
             </div>
           </div>
         </>

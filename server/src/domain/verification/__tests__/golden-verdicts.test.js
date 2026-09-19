@@ -44,7 +44,10 @@ test('Golden 2 — mailbox rejected -> UNDELIVERABLE / REMOVE', async () => {
 test('Golden 3 — real+random accept (catchAll) -> ACCEPT_ALL / KEEP, NOT DELIVERABLE', async () => {
   const r = await engineWith({ reachable: true, catchAll: true, source: 'smtp-worker' }).verify('a@example.com');
   assert.equal(r.mailboxStatus, MAILBOX_STATUS.ACCEPT_ALL);
-  assert.equal(r.recommendedAction, ACTION.KEEP);
+  // Canonical semantics: catch-all is UNCONFIRMED (mailbox not proven) → REVIEW,
+  // never an automatic KEEP/Safe. It is still NOT DELIVERABLE.
+  assert.equal(r.recommendedAction, ACTION.REVIEW);
+  assert.equal(r.classification, 'review');
   assert.notEqual(r.mailboxStatus, MAILBOX_STATUS.DELIVERABLE);
   assert.notEqual(r.deliverability, DELIVERABILITY.DELIVERABLE);
 });

@@ -87,10 +87,10 @@ function Report({ analysis }: { analysis: ListHealthAnalysis }) {
           </div>
         </div>
         <div>
-          <Dist label="Deliverable" count={metrics.deliverable} pct={p.deliverable} color="var(--safe)" />
+          <Dist label="Deliverable (confirmed)" count={metrics.deliverable} pct={p.deliverable} color="var(--safe)" />
           <Dist label="Undeliverable" count={metrics.undeliverable} pct={p.undeliverable} color="var(--remove)" />
-          <Dist label="Unknown" count={metrics.unknown} pct={p.unknown} color="var(--unknown)" />
-          <Dist label="Accept-All" count={metrics.acceptAll} pct={p.acceptAll} color="var(--catchall)" />
+          <Dist label="Unknown / unconfirmed" count={metrics.unknown} pct={p.unknown} color="var(--unknown)" />
+          <Dist label="Catch-All / unconfirmed" count={metrics.acceptAll} pct={p.acceptAll} color="var(--catchall)" />
         </div>
       </div>
 

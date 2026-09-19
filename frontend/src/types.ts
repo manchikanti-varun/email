@@ -105,9 +105,15 @@ export interface ListCounts {
 }
 
 export interface ListMetrics {
+  /** Confirmed mailbox-level deliverability = deliverable / total. */
   deliverability: number;
+  mailboxDeliverability?: number;
+  /** Catch-all acceptance = acceptAll / total (infra-positive, mailbox unconfirmed). */
+  catchAllAcceptance?: number;
+  /** Could-not-verify share = unknown / total. */
+  unconfirmed?: number;
   dataQuality: number;
-  risk: number;
+  /** Infrastructure health (MX present, not disposable). NOT mailbox deliverability. */
   domainHealth: number;
 }
 
@@ -250,13 +256,25 @@ export interface Preflight {
   recipients: number;
   recommendedSendList: number;
   verdict: string;
+  confirmedPct?: number;
+  reviewPct?: number;
+  blockedPct?: number;
   buckets: {
+    confirmed: number;
+    catchAll: number;
+    unknown: number;
+    blocked: number;
+    disposable: number;
+    // Backward-compatible aliases.
     safe: number;
     review: number;
-    catchAll: number;
     invalid: number;
-    disposable: number;
-    unknown: number;
+  };
+  eligibility?: {
+    confirmed: number;
+    review: number;
+    unconfirmed: number;
+    blocked: number;
   };
 }
 

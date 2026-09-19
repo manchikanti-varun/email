@@ -85,8 +85,10 @@ test('catch-all -> ACCEPTED + KEEP (campaign-eligible), NOT removed', async () =
   const r = await engineWith({ smtp }).verify('anyone@example.com');
   assert.equal(r.deliverability, DELIVERABILITY.ACCEPTED);
   assert.equal(r.mailboxStatus, 'ACCEPT_ALL');
-  assert.equal(r.recommendedAction, ACTION.KEEP);
-  assert.equal(r.classification, 'safe');
+  // Canonical semantics: catch-all mailbox is unconfirmed → REVIEW, not KEEP/safe.
+  assert.equal(r.recommendedAction, ACTION.REVIEW);
+  assert.equal(r.classification, 'review');
+  assert.notEqual(r.recommendedAction, ACTION.REMOVE); // still not undeliverable
   assert.equal(r.score, 100);
   assert.ok(r.reasons.some((t) => /catch-all|Accepted/i.test(t)));
 });

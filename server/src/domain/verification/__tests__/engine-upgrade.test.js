@@ -144,8 +144,9 @@ test('4) Real + random address both 250 → ACCEPT_ALL (not DELIVERABLE)', async
   assert.equal(r.mailboxStatus, MAILBOX_STATUS.ACCEPT_ALL);
   assert.equal(r.deliverability, DELIVERABILITY.ACCEPTED);
   assert.notEqual(r.deliverability, DELIVERABILITY.DELIVERABLE);
-  assert.equal(r.recommendedAction, ACTION.KEEP);
-  assert.equal(r.classification, 'safe');
+  // Canonical semantics: catch-all is unconfirmed → REVIEW, not KEEP/safe.
+  assert.equal(r.recommendedAction, ACTION.REVIEW);
+  assert.equal(r.classification, 'review');
   assert.equal(r.verificationQuality, VERIFICATION_QUALITY.MEDIUM);
   assert.equal(r.deliverabilityScore, 100, 'catch-all must not penalize score');
   assert.ok(r.evidence.some((e) => e.status === 'info' && /catch-all/i.test(e.label)));
