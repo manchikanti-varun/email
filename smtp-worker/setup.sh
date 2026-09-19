@@ -104,15 +104,22 @@ else
 fi
 
 # --- 6. Print the app-side wiring ------------------------------------------
-SECRET="$(grep -E '^WORKER_SECRET=' .env | cut -d= -f2- || true)"
+# NEVER print the WORKER_SECRET value. Confirm only that it is configured; the
+# operator reads the value from smtp-worker/.env (chmod 600) when wiring the app.
+if grep -qE '^WORKER_SECRET=.+' .env; then SECRET_STATUS="yes"; else SECRET_STATUS="NO — set WORKER_SECRET in .env"; fi
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────
 Next: point your main MailHealth app at this worker.
 
-SMTP_MODE=auto
+SMTP_MODE=remote
 SMTP_WORKER_URL=https://${WORKER_DOMAIN}
-SMTP_WORKER_SECRET=${SECRET}
+SMTP_WORKER_SECRET=<copy the WORKER_SECRET value from smtp-worker/.env>
+
+Worker secret configured: ${SECRET_STATUS}
+(The secret value is intentionally NOT printed. Read it with:
+    sudo grep '^WORKER_SECRET=' .env    # on this host only
+ and set the SAME value as SMTP_WORKER_SECRET in the main app.)
 
 HTTPS needs an A/AAAA record for ${WORKER_DOMAIN} pointing at this
 server, with ports 80 and 443 reachable (Caddy issues the cert).

@@ -299,3 +299,135 @@ export interface AgentChatPayload {
 export interface VerificationHealth {
   mode?: string;
 }
+
+// ---- AI List Health Analysis (POST /api/ai/lists/:id/analyze) ----
+export type HealthLevel = 'Excellent' | 'Good' | 'Needs Attention' | 'Poor' | 'Critical';
+export type Severity = 'high' | 'medium' | 'low';
+
+export interface ListHealthMetrics {
+  total: number;
+  deliverable: number;
+  undeliverable: number;
+  unknown: number;
+  acceptAll: number;
+  risky: number;
+  percentages: {
+    deliverable: number;
+    undeliverable: number;
+    unknown: number;
+    acceptAll: number;
+    risky: number;
+  };
+  additionalSignals: {
+    disposable: number;
+    roleBased: number;
+    catchAll: number;
+    noMx: number;
+    syntaxInvalid: number;
+    domainInvalid: number;
+    greylisted: number;
+  };
+}
+
+export interface ScoreComponent {
+  signal: string;
+  percentage: number;
+  weight: number;
+  penalty: number;
+}
+
+export interface ScoreModel {
+  formula: string;
+  weightedRisk: number;
+  components: ScoreComponent[];
+}
+
+export interface ProviderBreakdown {
+  provider: string;
+  total: number;
+  deliverable: number;
+  undeliverable: number;
+  unknown: number;
+  acceptAll: number;
+  percentages: { undeliverable: number; unknown: number };
+}
+
+export interface DomainBreakdown {
+  domain: string;
+  total: number;
+  deliverable: number;
+  undeliverable: number;
+  unknown: number;
+  accepted: number;
+  problemRate: number;
+}
+
+export interface HealthRiskSignal {
+  code: string;
+  severity: Severity;
+  count: number;
+  percentage: number;
+  label: string;
+  detail: string;
+}
+
+export interface HealthRecommendation {
+  priority: Severity;
+  actionType: string;
+  action: string;
+  reason: string;
+}
+
+export interface DiagnosisKeyIssue {
+  issue: string;
+  severity: Severity;
+  evidence: string;
+  impact: string;
+}
+
+export interface DiagnosisRecommendation {
+  action: string;
+  priority: Severity;
+  reason: string;
+}
+
+export interface Diagnosis {
+  summary: string;
+  keyIssues: DiagnosisKeyIssue[];
+  recommendations: DiagnosisRecommendation[];
+  observations: string[];
+}
+
+export interface DiagnosisMeta {
+  source: 'ai' | 'deterministic';
+  model: string;
+  latencyMs: number;
+  estimatedCost: number;
+  error?: string;
+}
+
+export interface ListHealthAnalysis {
+  list: { id: string; name: string; total: number; status: string };
+  generatedAt: string;
+  healthScore: number;
+  healthLevel: HealthLevel;
+  scoreModel: ScoreModel;
+  metrics: ListHealthMetrics;
+  providers: ProviderBreakdown[];
+  domains: DomainBreakdown[];
+  riskSignals: HealthRiskSignal[];
+  recommendations: HealthRecommendation[];
+  diagnosis: Diagnosis;
+  diagnosisMeta: DiagnosisMeta;
+}
+
+export interface LatestListAnalysis {
+  available: boolean;
+  message?: string;
+  healthScore?: number;
+  healthLevel?: HealthLevel;
+  report?: Omit<ListHealthAnalysis, 'list' | 'diagnosis' | 'diagnosisMeta'>;
+  diagnosis?: Diagnosis | null;
+  diagnosisSource?: 'ai' | 'deterministic';
+  createdAt?: string;
+}

@@ -89,6 +89,15 @@ export class AgentAuditRepository {
   findByConversation(_userId, _conversationId, _limit) { notImplemented('AgentAuditRepository.findByConversation'); }
 }
 
+export class RevokedTokenRepository {
+  // Record a revoked token id (jti) with the instant it naturally expires.
+  revoke(_jti, _expiresAtIso, _userId) { notImplemented('RevokedTokenRepository.revoke'); }
+  // -> boolean. MUST throw on backing-store failure so callers can fail closed.
+  isRevoked(_jti) { notImplemented('RevokedTokenRepository.isRevoked'); }
+  // Remove entries whose tokens have already expired. -> number removed.
+  cleanupExpired() { notImplemented('RevokedTokenRepository.cleanupExpired'); }
+}
+
 // ---- Gateways / services --------------------------------------------------
 
 export class DnsResolver {
@@ -122,6 +131,9 @@ export class PasswordHasher {
 export class TokenService {
   sign(_user) { notImplemented('TokenService.sign'); }
   verify(_token) { notImplemented('TokenService.verify'); } // -> userId | null
+  // -> { userId, jti, exp } | null. Additive; adapters that predate revocation
+  // may omit it, and callers fall back to verify().
+  verifyDetailed(_token) { notImplemented('TokenService.verifyDetailed'); }
 }
 
 export class ApiKeyService {

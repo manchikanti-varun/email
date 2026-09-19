@@ -5,22 +5,30 @@
 const CHECK_INTERVAL_MS = 60 * 1000;
 
 export class Scheduler {
-  constructor({ scheduleRepository, listRepository, contactRepository, queue }) {
+  constructor({ scheduleRepository, listRepository, contactRepository, queue, revokedTokenRepository = null }) {
     this.schedules = scheduleRepository;
     this.lists = listRepository;
     this.contacts = contactRepository;
     this.queue = queue;
+    // Optional: sweep expired JWT-revocation entries so the store stays bounded.
+    this.revokedTokens = revokedTokenRepository;
     this.timer = null;
   }
 
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      try { this._runDueSchedules(); this._runGreylistRetries(); }
+      try { this._runDueSchedules(); this._runGreylistRetries(); this._cleanupRevokedTokens(); }
       catch (e) { console.error('Scheduler error:', e.message); }
     }, CHECK_INTERVAL_MS);
     this.timer.unref?.();
     console.log('  Scheduler started (re-verification + greylist retries)');
+  }
+
+  _cleanupRevokedTokens() {
+    if (!this.revokedTokens) return;
+    try { this.revokedTokens.cleanupExpired(); }
+    catch (e) { console.error('Revoked-token cleanup error:', e.message); }
   }
 
   stop() {

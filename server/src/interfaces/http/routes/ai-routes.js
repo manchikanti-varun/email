@@ -14,11 +14,26 @@ export function makeAiRouter(deps) {
     aiCreditOptimization, aiEmailExplanation, aiBusinessInsights,
     aiInvestigate, aiIncidents, aiBenchmarkAnalysis,
     aiConfidenceCalibration, aiCalibrationBenchmark, aiCalibrationDrift,
+    analyzeListHealth, getLatestListAnalysis,
     calibrator,
   } = deps;
 
   const router = express.Router();
   const uid = (req) => req.user.id;
+
+  // ---- AI List Health Analysis & Diagnosis -------------------------------
+
+  // POST /api/ai/lists/:id/analyze  { useAi?: boolean }
+  // Computes the deterministic health report + one fail-safe AI diagnosis.
+  router.post('/lists/:id/analyze', authRequired, asyncHandler(async (req, res) => {
+    const useAi = (req.body || {}).useAi !== false; // default true; AI still fails safe
+    res.json(await analyzeListHealth.execute(uid(req), req.params.id, { useAi }));
+  }));
+
+  // GET /api/ai/lists/:id/analysis — latest persisted analysis (no LLM call).
+  router.get('/lists/:id/analysis', authRequired, asyncHandler((req, res) => {
+    res.json(getLatestListAnalysis.execute(uid(req), req.params.id));
+  }));
 
   // POST /api/ai/campaign-risk  { listId }
   router.post('/campaign-risk', authRequired, asyncHandler((req, res) => {

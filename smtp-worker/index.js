@@ -19,6 +19,7 @@ import {
 import { withRetry, transportErrorRetryable } from './retry.js';
 import { makeAuth, makeRateLimiter, validateVerifyBody } from './security.js';
 import { metrics, checkOutboundPort25, activeJobs } from './health.js';
+import { filterSafeMxHosts } from './ssrf.js';
 
 assertConfig();
 
@@ -89,6 +90,36 @@ app.post('/internal/verify', rateLimit, auth, async (req, res) => {
     if (!mxHosts.length) mxHosts = [domain]; // implicit MX
   }
   mxHosts = [...new Set(mxHosts.filter(Boolean))].slice(0, MAX_MX_ATTEMPTS);
+
+  // SSRF defence-in-depth: never open a socket to an MX host that resolves to a
+  // private/loopback/link-local/metadata address. If nothing safe remains, this
+  // is an INCONCLUSIVE result (status:'unknown') — never a mailbox verdict — so
+  // the main engine treats it as UNKNOWN, preserving "no evidence != negative".
+  // WORKER_ALLOW_PRIVATE_MX bypasses the guard for local dev/tests that point at
+  // a loopback fake MX; it is refused in production (see config.assertConfig).
+  const { safe: safeMxHosts, rejected: rejectedMxHosts } = config.allowPrivateMx
+    ? { safe: mxHosts, rejected: [] }
+    : await filterSafeMxHosts(mxHosts);
+  if (safeMxHosts.length === 0) {
+    return res.json({
+      email,
+      smtp: {
+        status: 'unknown',
+        code: null,
+        response: null,
+        mxHost: null,
+        triedHosts: [],
+        mxAttempts: rejectedMxHosts.map((r) => ({ mxHost: r.host, outcome: 'blocked_ssrf', error: r.reason })),
+        responseTimeMs: 0,
+        error: 'no_safe_mx_host',
+        errorClass: 'unknown',
+        attempts: 0,
+      },
+      catchAll: false,
+      worker: { id: config.workerId, region: config.region },
+    });
+  }
+  mxHosts = safeMxHosts;
 
   metrics.incActive();
   await acquire();

@@ -26,6 +26,9 @@ before(async () => {
   process.env.SMTP_MX_PORT = String(mx.port);
   process.env.SMTP_TIMEOUT_MS = '2000';
   process.env.NODE_ENV = 'test';
+  // The fake MX runs on loopback (127.0.0.1); allow it past the SSRF guard for
+  // this test only (refused in production by config.assertConfig).
+  process.env.WORKER_ALLOW_PRIVATE_MX = 'true';
   ({ app } = await import('../index.js'));
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;

@@ -34,10 +34,19 @@ export function makeRequestLogger(config) {
 }
 
 // ---- Rate limiters ---------------------------------------------------------
+// Rate limiting may be disabled ONLY outside production. In production the
+// DISABLE_RATE_LIMIT flag is ignored here (fail closed) — and config.js also
+// refuses to start when it is set — so production can never silently run with
+// rate limiting off. `rateLimitingDisabled()` is the single source of truth.
+export function rateLimitingDisabled() {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  return !isProd && process.env.DISABLE_RATE_LIMIT === 'true';
+}
+
 const rlOpts = (windowMs, max, message) => ({
   windowMs, max, standardHeaders: true, legacyHeaders: false,
   message: { error: message },
-  skip: () => process.env.DISABLE_RATE_LIMIT === 'true',
+  skip: () => rateLimitingDisabled(),
 });
 
 export const apiLimiter = rateLimit(
@@ -55,24 +64,65 @@ export const verifyLimiter = rateLimit(
 
 // ---- Auth middleware -------------------------------------------------------
 // Accepts a Bearer JWT / cookie (dashboard) or an X-API-Key header (API).
-export function makeAuthMiddleware({ users, tokenService, apiKeyService }) {
-  function userFromToken(token) {
-    const id = tokenService.verify(token);
-    return id ? users.findById(id) : null;
+//
+// `revokedTokens` is an OPTIONAL RevokedTokenRepository. When present, a token
+// whose `jti` has been revoked (logout) is rejected. Revocation-store lookups
+// FAIL CLOSED: if the store throws, the request is rejected rather than
+// silently accepted, so a store outage cannot resurrect revoked tokens.
+export function makeAuthMiddleware({ users, tokenService, apiKeyService, revokedTokens = null }) {
+  // Returns { user, jti } for a valid, non-revoked token; throws { revoked:true }
+  // when the token is revoked or the revocation store fails (fail closed);
+  // returns null for an invalid/expired/malformed token.
+  function resolveToken(token) {
+    const detail = typeof tokenService.verifyDetailed === 'function'
+      ? tokenService.verifyDetailed(token)
+      : (() => { const id = tokenService.verify(token); return id ? { userId: id, jti: null } : null; })();
+    if (!detail) return null;
+    if (revokedTokens && detail.jti) {
+      let revoked;
+      try {
+        revoked = revokedTokens.isRevoked(detail.jti);
+      } catch {
+        // Fail closed: cannot prove the token is still valid.
+        const e = new Error('revocation_check_failed');
+        e.failClosed = true;
+        throw e;
+      }
+      if (revoked) {
+        const e = new Error('token_revoked');
+        e.failClosed = true;
+        throw e;
+      }
+    }
+    const user = detail.userId ? users.findById(detail.userId) : null;
+    return user ? { user, jti: detail.jti } : null;
   }
+
   return function authRequired(req, res, next) {
     const header = req.headers.authorization || '';
     const bearer = header.startsWith('Bearer ') ? header.slice(7) : null;
     const cookieToken = req.cookies?.token || null;
     const apiKey = req.headers['x-api-key'] || null;
 
-    let user = null;
-    if (bearer) user = userFromToken(bearer);
-    else if (cookieToken) user = userFromToken(cookieToken);
-    else if (apiKey) user = users.findByApiKeyHash(apiKeyService.hash(apiKey));
+    let resolved = null;
+    try {
+      if (bearer) resolved = resolveToken(bearer);
+      else if (cookieToken) resolved = resolveToken(cookieToken);
+      else if (apiKey) {
+        const user = users.findByApiKeyHash(apiKeyService.hash(apiKey));
+        if (user) resolved = { user, jti: null };
+      }
+    } catch (e) {
+      // Revoked token or revocation-store failure -> fail closed.
+      if (e && e.failClosed) return res.status(401).json({ error: 'Unauthorized' });
+      throw e;
+    }
 
-    if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    req.user = user;
+    if (!resolved || !resolved.user) return res.status(401).json({ error: 'Unauthorized' });
+    req.user = resolved.user;
+    // Expose the token id + raw token so the logout handler can revoke it.
+    req.tokenId = resolved.jti || null;
+    req.bearerOrCookieToken = bearer || cookieToken || null;
     req.authMethod = apiKey && !bearer && !cookieToken ? 'api_key' : 'session';
     next();
   };

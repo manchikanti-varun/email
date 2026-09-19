@@ -15,6 +15,7 @@ import { ListProgress } from './ListProgress';
 import { ListHealthSummary } from './ListHealthSummary';
 import { CleaningSummary } from './CleaningSummary';
 import { PreflightCard } from './PreflightCard';
+import { ListHealthDiagnosis } from './ListHealthDiagnosis';
 import { AiInsights } from './AiInsights';
 import { HealthTrend } from './HealthTrend';
 import { ContactTable } from './ContactTable';
@@ -94,6 +95,7 @@ export function ListDetailContainer({ id }: { id: string }) {
         <CleaningSummary id={id} summary={summary} onPurgeRemove={purgeRemove} />
       </div>
 
+      <ListHealthDiagnosis id={id} />
       <PreflightCard id={id} />
       <AiInsights id={id} />
       {history.length > 1 && <HealthTrend history={history} />}

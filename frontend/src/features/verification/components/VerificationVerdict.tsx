@@ -23,15 +23,19 @@ const VERDICT_META: Record<Verdict, { title: string; blurb: string; cls: string 
   ACCEPT_ALL: {
     title: 'Accept-all',
     blurb:
-      'A catch-all server accepts mail for this domain, so the individual ' +
-      'mailbox cannot be independently confirmed. The mail path is healthy.',
+      'The recipient server accepted both the target and a randomized probe, ' +
+      'indicating the domain may accept mail for arbitrary recipients. SMTP ' +
+      'verification therefore cannot conclusively confirm whether this specific ' +
+      'mailbox exists. The mail path itself is healthy — this is not a failure.',
     cls: 'verdict-acceptall',
   },
   UNKNOWN: {
     title: 'Unknown',
     blurb:
-      'The mailbox could not be conclusively verified. This is unconfirmed — ' +
-      'not the same as undeliverable.',
+      'MailHealth could not obtain conclusive SMTP evidence. This may be caused ' +
+      'by temporary server behavior, a timeout, a connection failure, or other ' +
+      'transport limitations. This is unconfirmed — not the same as undeliverable, ' +
+      'and it does not mean the address is invalid.',
     cls: 'verdict-unknown',
   },
 };

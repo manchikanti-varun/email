@@ -105,6 +105,13 @@ export const config = {
     // The main app does NOT require outbound port 25 in 'remote'/'auto'-with-worker.
     mode: (process.env.SMTP_MODE || 'auto').toLowerCase(),
   },
+  // Encryption key for webhook signing-secrets at rest (AES-256-GCM). Must be
+  // 32 bytes, supplied as 64 hex chars or 44-char base64. Kept OUTSIDE the
+  // database. In development a deterministic key is derived from JWT_SECRET so
+  // local setups work without extra config; production REQUIRES an explicit,
+  // high-entropy key (enforced in assertProductionConfig).
+  webhookEncryptionKey: (process.env.WEBHOOK_ENCRYPTION_KEY || '').trim(),
+
   // MailHealth-owned SMTP verification worker (see smtp-worker/). Runs where
   // outbound port 25 is permitted. No third-party verification API involved.
   smtpWorker: {
@@ -177,8 +184,16 @@ export function assertProductionConfig() {
   }
   // If a worker URL is configured, it must be HTTPS and carry a strong secret.
   if (config.smtpWorker.url) {
-    if (!/^https:\/\//i.test(config.smtpWorker.url)) {
-      console.warn('  [warn] SMTP_WORKER_URL is not HTTPS; worker traffic (incl. the bearer secret) would be sent in the clear.');
+    // Fail closed on an insecure worker URL: the bearer secret travels on this
+    // hop, so plaintext HTTP to anything but a same-host loopback address would
+    // leak it. A loopback URL (same-box deployment) is the only permitted
+    // non-HTTPS case in production.
+    const isHttps = /^https:\/\//i.test(config.smtpWorker.url);
+    let host = '';
+    try { host = new URL(config.smtpWorker.url).hostname.toLowerCase(); } catch { host = ''; }
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    if (!isHttps && !isLoopback) {
+      problems.push('SMTP_WORKER_URL must use HTTPS in production (plaintext HTTP would leak the worker bearer secret).');
     }
     if (!config.smtpWorker.secret || config.smtpWorker.secret.length < 24) {
       problems.push('SMTP_WORKER_SECRET must be set to a strong value (>= 24 chars) when SMTP_WORKER_URL is configured.');
@@ -186,6 +201,25 @@ export function assertProductionConfig() {
   }
   if (config.smtp.mode === 'remote' && !config.smtpWorker.url) {
     problems.push('SMTP_MODE=remote requires SMTP_WORKER_URL to be set.');
+  }
+  // Rate limiting must never be silently disabled in production. Refuse to
+  // start rather than run an unthrottled, brute-forceable API.
+  if (String(process.env.DISABLE_RATE_LIMIT).toLowerCase() === 'true') {
+    problems.push('DISABLE_RATE_LIMIT must not be set in production (rate limiting cannot be disabled in prod).');
+  }
+  // Webhook signing-secrets are encrypted at rest with this key; production
+  // must not fall back to the JWT-derived dev key. Require 32 bytes (64 hex or
+  // 32-byte base64).
+  {
+    const k = config.webhookEncryptionKey;
+    const isHex64 = /^[0-9a-fA-F]{64}$/.test(k);
+    let isB64_32 = false;
+    try { isB64_32 = Buffer.from(k, 'base64').length === 32; } catch { isB64_32 = false; }
+    if (!k) {
+      problems.push('WEBHOOK_ENCRYPTION_KEY must be set in production (32 bytes as 64 hex chars or base64).');
+    } else if (!isHex64 && !isB64_32) {
+      problems.push('WEBHOOK_ENCRYPTION_KEY must be 32 bytes (64 hex chars or 32-byte base64).');
+    }
   }
   // Diagnose the most common cause of "every contact is Unknown": SMTP probing
   // is enabled but there is no configured path that can open a connection when

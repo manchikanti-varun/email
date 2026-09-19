@@ -13,3 +13,11 @@ export { campaignRisk, listHealthAnalysis, healthPrediction } from './health-mod
 export { detectAnomalies, detectIncident, domainIntelligence } from './detection-modules.js';
 export { smartCleaning, prioritizeReverification, optimizeCredits, explainEmail } from './operations-modules.js';
 export { businessInsights, analyzeBenchmark, investigate } from './insight-modules.js';
+export {
+  buildListHealth, healthLevel, classifyProvider,
+  HEALTH_WEIGHTS, HEALTH_LEVELS,
+} from './list-health.js';
+export {
+  DIAGNOSIS_SYSTEM_PROMPT, buildDiagnosisInput, validateDiagnosis,
+  fallbackDiagnosis, diagnosisMeta,
+} from './list-diagnosis.js';

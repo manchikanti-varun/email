@@ -15,6 +15,8 @@ import { SqliteWebhookRepository } from './infrastructure/persistence/sqlite/web
 import { SqliteAlertRepository } from './infrastructure/persistence/sqlite/alert-repository.js';
 import { SqliteScheduleRepository } from './infrastructure/persistence/sqlite/schedule-repository.js';
 import { SqliteAgentAuditRepository } from './infrastructure/persistence/sqlite/agent-audit-repository.js';
+import { SqliteRevokedTokenRepository } from './infrastructure/persistence/sqlite/revoked-token-repository.js';
+import { SqliteListAnalysisRepository } from './infrastructure/persistence/sqlite/list-analysis-repository.js';
 
 // Infrastructure — verification gateways
 import { NodeDnsResolver } from './infrastructure/verification/node-dns-resolver.js';
@@ -28,6 +30,7 @@ import { loadFeeds } from './infrastructure/verification/feed-loader.js';
 import { BcryptPasswordHasher } from './infrastructure/security/bcrypt-password-hasher.js';
 import { JwtTokenService } from './infrastructure/security/jwt-token-service.js';
 import { Sha256ApiKeyService } from './infrastructure/security/api-key-service.js';
+import { createSecretCipher } from './infrastructure/security/secret-crypto.js';
 import { HttpWebhookSender } from './infrastructure/webhooks/http-webhook-sender.js';
 import { VerificationQueue } from './infrastructure/jobs/verification-queue.js';
 import { Scheduler } from './infrastructure/jobs/scheduler.js';
@@ -61,6 +64,7 @@ import {
   CalibrateVerificationConfidence, CalibrateSingleResult,
   GetCalibrationBenchmark, GetCalibrationDrift,
 } from './application/ai-use-cases.js';
+import { AnalyzeListHealth, GetLatestListAnalysis } from './application/list-health-use-cases.js';
 
 // ML Confidence Calibration layer (additive; downstream of the deterministic
 // engine). Loads a trained model artifact; falls back safely when unavailable.
@@ -88,6 +92,8 @@ export function createContainer() {
   const alerts = new SqliteAlertRepository(db);
   const schedules = new SqliteScheduleRepository(db);
   const agentAudit = new SqliteAgentAuditRepository(db);
+  const revokedTokens = new SqliteRevokedTokenRepository(db);
+  const listAnalysis = new SqliteListAnalysisRepository(db);
 
   // --- Verification gateways + engine ------------------------------------
   const referenceData = new ReferenceData();
@@ -140,6 +146,24 @@ export function createContainer() {
   const tokenService = new JwtTokenService(config.jwtSecret);
   const apiKeyService = new Sha256ApiKeyService();
 
+  // Webhook secret encryption-at-rest (H2). Explicit key in prod; a derived
+  // dev key (from JWT_SECRET) locally. createSecretCipher throws in prod when
+  // no key is configured — but assertProductionConfig already fails fast first.
+  const secretCipher = createSecretCipher({
+    key: config.webhookEncryptionKey,
+    devFallbackPassphrase: config.jwtSecret,
+    isProd: config.isProd,
+  });
+  // Re-bind the webhook repository with the cipher, then migrate any leftover
+  // plaintext secrets to encrypted-at-rest (idempotent).
+  webhooksRepo.cipher = secretCipher;
+  try {
+    const migrated = webhooksRepo.migratePlaintextSecrets();
+    if (migrated > 0) console.log(`  Encrypted ${migrated} plaintext webhook secret(s) at rest`);
+  } catch (e) {
+    console.error('  Webhook secret migration skipped:', e.message);
+  }
+
   // --- Webhooks, queue, scheduler ----------------------------------------
   const webhookSender = new HttpWebhookSender(webhooksRepo);
   const queue = new VerificationQueue({
@@ -159,6 +183,7 @@ export function createContainer() {
     listRepository: lists,
     contactRepository: contacts,
     queue,
+    revokedTokenRepository: revokedTokens,
   });
 
   // --- Application use cases ----------------------------------------------
@@ -213,7 +238,7 @@ export function createContainer() {
   useCases.agentHistory = new AgentHistory({ audit: agentAudit });
 
   // --- Interface glue -----------------------------------------------------
-  const authRequired = makeAuthMiddleware({ users, tokenService, apiKeyService });
+  const authRequired = makeAuthMiddleware({ users, tokenService, apiKeyService, revokedTokens });
   const cookies = makeCookieHelpers(config);
 
   // Verification capability, filled in at boot by the SMTP self-test.
@@ -251,6 +276,14 @@ export function createContainer() {
     aiCalibrateResult: new CalibrateSingleResult({ calibrator }),
     aiCalibrationBenchmark: new GetCalibrationBenchmark(),
     aiCalibrationDrift: new GetCalibrationDrift(),
+    // AI List Health Analysis & Diagnosis (deterministic report + one
+    // fail-safe list-level LLM diagnosis). Persists the latest analysis.
+    analyzeListHealth: new AnalyzeListHealth({
+      getListDetail: useCases.getListDetail, aiProvider, analysisRepository: listAnalysis,
+    }),
+    getLatestListAnalysis: new GetLatestListAnalysis({
+      getListDetail: useCases.getListDetail, analysisRepository: listAnalysis,
+    }),
   });
 
   return {
@@ -267,6 +300,8 @@ export function createContainer() {
     useCases,
     authRequired,
     cookies,
+    tokenService,
+    revokedTokens,
     agent,
     // convenience for boot logging
     providerName: provider.name,

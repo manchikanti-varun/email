@@ -21,7 +21,7 @@ import { makeAgentRouter } from './routes/agent-routes.js';
 import { makeAiRouter } from './routes/ai-routes.js';
 
 export function buildApp(container) {
-  const { config, db, verifyCapability, calibrator, useCases, authRequired, cookies } = container;
+  const { config, db, verifyCapability, calibrator, useCases, authRequired, cookies, tokenService, revokedTokens } = container;
   const publicDir = path.join(config.ROOT, 'public');
 
   const app = express();
@@ -99,7 +99,7 @@ export function buildApp(container) {
 
   // ---- API routes (rate limited) ----
   app.use('/api/', apiLimiter);
-  app.use('/api/auth', authLimiter, makeAuthRouter({ ...useCases, authRequired, cookies }));
+  app.use('/api/auth', authLimiter, makeAuthRouter({ ...useCases, authRequired, cookies, tokenService, revokedTokens }));
   app.use('/api/verify', verifyLimiter, makeVerifyRouter({ ...useCases, authRequired }));
   app.use('/api/lists', makeListRouter({ ...useCases, authRequired, uploadLimitMb: config.uploadLimitMb }));
   app.use('/api/campaigns', makeCampaignRouter({ ...useCases, authRequired }));

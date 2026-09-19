@@ -15,6 +15,8 @@ import type {
   DomainsResult,
   HealthPrediction,
   AnomaliesResult,
+  ListHealthAnalysis,
+  LatestListAnalysis,
 } from '../../../types';
 
 export const listsApi = {
@@ -38,4 +40,12 @@ export const listsApi = {
   aiDomains: (id: string) => request<DomainsResult>('GET', `/ai/lists/${id}/domains`),
   aiHealthPrediction: (id: string) => request<HealthPrediction>('GET', `/ai/lists/${id}/health-prediction`),
   aiAnomalies: (id: string) => request<AnomaliesResult>('GET', `/ai/lists/${id}/anomalies`),
+
+  // AI List Health Analysis & Diagnosis. `analyze` runs the deterministic
+  // report + one fail-safe AI diagnosis (AI unavailable → deterministic).
+  // `latestAnalysis` returns the persisted result with no LLM call.
+  analyze: (id: string, useAi = true) =>
+    request<ListHealthAnalysis>('POST', `/ai/lists/${id}/analyze`, { useAi }),
+  latestAnalysis: (id: string) =>
+    request<LatestListAnalysis>('GET', `/ai/lists/${id}/analysis`),
 };

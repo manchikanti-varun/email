@@ -42,6 +42,12 @@ export const config = {
   // it is authenticated).
   rateLimitPerMin: int(process.env.WORKER_RATE_LIMIT_PER_MIN, 600),
 
+  // SSRF guard: by default the worker refuses to open sockets to MX hosts that
+  // resolve to private/loopback/link-local/metadata addresses. Set to true ONLY
+  // for local development/tests that point at a loopback fake MX. It is refused
+  // in production (assertConfig) so the guard can never be disabled on a live host.
+  allowPrivateMx: bool(process.env.WORKER_ALLOW_PRIVATE_MX, false),
+
   isProd: (process.env.NODE_ENV || 'development').toLowerCase() === 'production',
 };
 
@@ -52,6 +58,11 @@ export function assertConfig() {
   }
   if (config.isProd && config.secret.length < 24) {
     console.error('[smtp-worker] Refusing to start: WORKER_SECRET must be at least 24 characters.');
+    process.exit(1);
+  }
+  // The SSRF guard must never be disabled on a live host.
+  if (config.isProd && config.allowPrivateMx) {
+    console.error('[smtp-worker] Refusing to start: WORKER_ALLOW_PRIVATE_MX must not be set in production.');
     process.exit(1);
   }
 }
