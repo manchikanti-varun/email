@@ -13,7 +13,7 @@
 #     mailhealth-smtp-worker
 #
 # Then put it behind HTTPS (Caddy/nginx) and point the main app at it with
-# SMTP_WORKER_URL + SMTP_WORKER_SECRET. See ../docs/SMTP-WORKER.md.
+# SMTP_WORKER_URL + SMTP_WORKER_SECRET. See ../docs/DOCUMENTATION.md.
 
 FROM node:24-alpine
 

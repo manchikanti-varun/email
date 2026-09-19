@@ -100,7 +100,7 @@ else
   warn "    curl -s http://127.0.0.1:8090/health"
   warn "If it reports \"outboundPort25\":false or hangs, your VPS provider is"
   warn "blocking port 25. Open a support ticket to have it lifted (Vultr and"
-  warn "Contabo details are in docs/SMTP-WORKER.md) before continuing."
+  warn "Contabo details are in docs/DOCUMENTATION.md) before continuing."
 fi
 
 # --- 6. Print the app-side wiring ------------------------------------------

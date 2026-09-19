@@ -226,7 +226,7 @@ export function assertProductionConfig() {
   // this host blocks outbound port 25. Not fatal (a local-only or provider-based
   // setup is legitimate), but it must be loud, because the failure mode is
   // otherwise invisible: syntax/DNS/MX all pass and results silently stay
-  // Unknown. See docs/SMTP-WORKER.md.
+  // Unknown. See docs/DOCUMENTATION.md.
   if (config.smtp.enabled && config.smtp.mode !== 'disabled' && !config.smtpWorker.url) {
     console.warn(
       `  [warn] SMTP probing is enabled (SMTP_MODE=${config.smtp.mode}) but SMTP_WORKER_URL is not set.`

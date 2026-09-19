@@ -1,43 +1,49 @@
 # MailHealth — Intelligent Email List Health & Deliverability Platform
+# MailHealth — Intelligent Email List Health & Deliverability Platform
 
-An MVP that goes beyond "valid / invalid" email verification. Upload a list,
-understand its health, and know which contacts are safe to send to, which
-should be removed or reviewed, and **exactly why**.
+Goes beyond "valid / invalid" email verification. Upload a list, understand its
+health, know which contacts are safe to send to, which to remove or review, and
+**exactly why** — with an optional AI diagnosis on top of a deterministic engine
+that remains the sole source of truth.
 
-> Upload → Analyze → Verify → Score → Explain → Clean → Monitor
+> Upload → Analyze → Verify → Score → Explain → Diagnose → Clean → Monitor
 
 ## Documentation
 
-- [Full documentation](docs/DOCUMENTATION.md) — complete reference (features, API, config, usage).
-- [Architecture](docs/ARCHITECTURE.md) — the clean-architecture layout of the server.
-- [Deployment](docs/DEPLOY.md) — deploying to Railway, Vercel, or a VPS.
-- [MailHealth AI Agent](docs/AGENT.md) — the optional AI operator that investigates list health and performs approved actions on top of the deterministic engine.
-- [SMTP Worker](docs/SMTP-WORKER.md) — MailHealth's self-owned SMTP verification. The main app needs no outbound port 25; a dedicated worker does the mailbox probing. No third-party verification API required.
+- [Full documentation](docs/DOCUMENTATION.md) — complete reference: features, architecture, API, config, usage, deployment, SMTP worker, AI layers, and more.
 
-## Features (MVP scope)
+## Features
 
-- **User authentication** — register / login with JWT + secure cookie.
-- **CSV / XLSX / TXT upload** — automatic email-column detection and de-duplication.
+- **Authentication** — register / login with JWT (in a secure cookie) or an
+  `X-API-Key`. Logout revokes the token server-side.
+- **CSV / XLSX / XLS / TXT upload** — automatic email-column detection and
+  de-duplication.
 - **Multi-level verification** — syntax, DNS, MX, live SMTP mailbox probe,
-  disposable detection, role-account detection, catch-all detection,
-  temporary-failure / greylisting handling.
-- **Risk classification** — every address is `Safe`, `Review`, `Remove`, or `Unknown`
-  (never a bare valid/invalid). Catch-all addresses are `Safe`/`Accepted`
-  (campaign-eligible) with a descriptive signal, not a review verdict.
-- **Explainable results** — each address gets plain-language reasons and a
-  business recommendation.
-- **Deliverability health score** — 0–100 per address, plus an overall list
-  health score with supporting metrics (deliverability, data quality, risk,
-  domain health).
-- **Automated list cleaning** — Keep / Review / Remove buckets and one-click
-  campaign-ready export.
-- **Campaign preflight** — "Can I safely send this campaign?" with a
-  recommended send list.
-- **Historical monitoring** — every verification is snapshotted so you can see
-  how list health changes over time.
-- **Credit management** — 1 credit per verified address.
-- **REST API** — verify emails from your own apps using an `X-API-Key`.
-- **Export** — download cleaned lists as CSV.
+  disposable / role-account / catch-all detection, temporary-failure /
+  greylisting handling.
+- **Explainable classification** — every address is `Safe`, `Review`, `Remove`,
+  or `Unknown` (never a bare valid/invalid), with plain-language reasons and a
+  recommended action. Catch-all is `Accepted` / `ACCEPT_ALL` / KEEP
+  (campaign-eligible) with a descriptive signal — not "risky".
+- **Health score** — 0–100 per address, plus an overall list health score with
+  supporting metrics (deliverability, data quality, risk, domain health).
+- **AI List Health diagnosis** — one list-level AI diagnosis (summary, key
+  issues, recommended actions) on an explainable deterministic score; falls back
+  to a deterministic diagnosis when no LLM is configured.
+- **AI agent** — an optional, list-focused operator that investigates health and
+  performs approved (confirmation-gated) actions. Never fabricates or overrides
+  a verdict.
+- **Automated cleaning** — Keep / Review / Remove buckets and one-click
+  campaign-ready export (CSV / XLSX).
+- **Campaign preflight** — "Can I safely send this campaign?" with a recommended
+  send list and a verdict.
+- **Historical monitoring** — scheduled re-verification snapshots list health
+  over time and raises alerts when it drops.
+- **Credit management** — 1 credit per verified address (new accounts start with
+  free credits).
+- **REST API + webhooks** — verify from your own apps; outbound webhooks
+  (`job.completed`, `health.dropped`) with HMAC signing and secrets encrypted at
+  rest.
 
 ## How verification works
 
@@ -48,19 +54,25 @@ with adapters in `server/src/infrastructure/verification/`):
 2. **Disposable / role** — matched against reference lists (bundled + optional
    external feed files in `data/feeds/`).
 3. **DNS / MX** — resolved via Node's built-in DNS (implicit-MX fallback).
-4. **SMTP probe** — a raw socket conversation up to `RCPT TO` (no mail is sent),
-   which also probes a random address to detect **catch-all** domains.
-5. **External provider fallback (hybrid, section 11)** — optional, only for
-   addresses the local checks leave *inconclusive* (SMTP blocked, greylisted,
-   unknown). Set `ZEROBOUNCE_API_KEY` or `KICKBOX_API_KEY` to activate one. When
-   no provider is configured, unconfirmed addresses are reported honestly as
-   **unknown** — the platform never fabricates a verdict.
+4. **SMTP probe** — a raw socket conversation `EHLO → MAIL FROM → RCPT TO →
+   QUIT` (**no message body / `DATA` is ever sent**), which also probes a random
+   address to detect **catch-all** domains. Routed by an `SmtpRouter` — locally
+   when this host has outbound port 25, otherwise via the MailHealth SMTP worker.
+5. **External provider fallback (optional)** — only for addresses the local
+   checks leave *inconclusive* (SMTP blocked, greylisted, unknown). Set
+   `ZEROBOUNCE_API_KEY` or `KICKBOX_API_KEY` to activate one. When no provider
+   is configured, unconfirmed addresses are reported honestly as **unknown** —
+   the platform never fabricates a verdict.
 6. **Independent dimensions, then an action** — the engine never collapses one
    characteristic into "health". It produces separate axes and only combines
    them at the end:
 
-   - **Deliverability** — `deliverable | undeliverable | risky | unknown`
-     (technical capability only; says nothing about the person).
+   - **Deliverability** — `deliverable | accepted | undeliverable | risky |
+     unknown` (technical capability only; says nothing about the person).
+     `accepted` is the catch-all case — positive infrastructure evidence where
+     the exact mailbox cannot be independently confirmed.
+   - **Mailbox status** — `DELIVERABLE | UNDELIVERABLE | ACCEPT_ALL | UNKNOWN`
+     (what can actually be proven about the mailbox).
    - **Confidence** — `high | medium | low | unknown` (strength of evidence).
      Lack of evidence is never turned into negative evidence.
    - **Risk signals** — descriptive characteristics (role-based, catch-all,
@@ -95,9 +107,14 @@ with adapters in `server/src/infrastructure/verification/`):
 - **Webhooks** (`src/infrastructure/webhooks/http-webhook-sender.js`) — per-user
   endpoints for `job.completed` / `health.dropped` / all events, with optional
   HMAC-SHA256 signing. Standardized payloads suit Zapier / Make / CRMs.
+- **AI intelligence layer** — deterministic analysis (campaign risk, health
+  analysis/prediction, anomaly/incident detection, domain intelligence, smart
+  cleaning, credit optimisation, business insights, investigation) plus an
+  optional ML confidence calibration that estimates verdict reliability without
+  ever changing the verdict.
 - **Benchmark harness** (`npm run benchmark`) — runs a labelled dataset through
   the local engine and the provider, reporting accuracy, agreement, per-address
-  time, and estimated provider cost (section 14).
+  time, and estimated provider cost.
 - **Exports** — CSV and **XLSX**, filterable (all / safe / review / remove /
   unknown / campaign).
 - **Bulk contact actions** — e.g. delete all `remove`-classified contacts.
@@ -112,8 +129,8 @@ with adapters in `server/src/infrastructure/verification/`):
 > `SMTP_MODE` controls routing: `auto` (default) tries local port 25 and falls
 > back to the MailHealth SMTP worker, `local` uses only the local probe,
 > `remote` always uses the worker, and `disabled` performs no probing. Point
-> `SMTP_WORKER_URL` + `SMTP_WORKER_SECRET` at a deployed worker — see
-> [SMTP Worker](docs/SMTP-WORKER.md).
+> `SMTP_WORKER_URL` + `SMTP_WORKER_SECRET` at a deployed worker — see the
+> [full documentation](docs/DOCUMENTATION.md).
 
 ## Running locally
 
@@ -124,7 +141,13 @@ npm start
 
 Then open http://localhost:3000 and create an account through the UI.
 
-Configuration lives in `.env` (see `.env.example`).
+**Requirements:** Node.js 24.x. No external services are required — the database
+is embedded SQLite and the AI is optional. Configuration lives in `.env` (see
+`.env.example`).
+
+Local development needs no outbound port 25: use `SMTP_MODE=disabled` (or
+`local` if your host has port 25), and leave the AI unconfigured to run the
+diagnosis/intelligence deterministically.
 
 Optional — benchmark verification quality against a labelled dataset you supply:
 
@@ -155,14 +178,14 @@ server/
                         reference-data.js, __tests__/
       ports/            index.js  (repository + gateway contracts)
     application/        *-use-cases.js (auth, verify, list, campaign,
-                        integration, agent, ai) + errors.js
+                        integration, agent, ai, list-health) + errors.js
     infrastructure/
-      persistence/sqlite/   connection.js + one repository per aggregate
+      persistence/sqlite/   connection.js, schema.js, one repository per aggregate
       verification/         node-dns-resolver, socket-smtp-probe,
                             remote-smtp-probe, smtp-router, smtp-policy,
                             providers, feed-loader
       security/             bcrypt-password-hasher, jwt-token-service,
-                            api-key-service
+                            api-key-service, secret-crypto
       webhooks/             http-webhook-sender
       jobs/                 verification-queue, scheduler
       parsing/              file-parser
@@ -172,20 +195,21 @@ server/
       routes/           auth, verify, list, campaign, integration, agent, ai
     container.js        composition root
     main.js             start()
-  agent/              optional AI operator + intelligence layer
-frontend/             React + TypeScript app (Vite); builds into public/
-  src/  index.html
-smtp-worker/          standalone port-25 SMTP worker (own package.json)
+  agent/              AI operator + intelligence layer + ML calibration
+frontend/             React + TypeScript app (Vite); feature-based src/;
+                      builds into public/
+smtp-worker/          standalone port-25 SMTP worker (own package.json, + ssrf.js)
 public/               generated build output (served by the Node server)
 data/feeds/*.txt      optional disposable.txt / roles.txt feeds
 ```
 
-## Not in this MVP (by design)
+## Out of scope (by design)
 
-Mobile app, large integration marketplace, a general-purpose chatbot (the
-MailHealth AI operator is deliberately list-focused and never invents
-verification results), enterprise permissions/RBAC, dozens of CRM
-integrations, advanced marketing automation, and unlimited monitoring.
+Sending email, SMTP relay, campaign/marketing automation, CRM, billing,
+enterprise RBAC, a general-purpose chatbot (the AI operator is deliberately
+list-focused and never invents verification results), and any port-25
+bypass/tunnel/proxy. The SMTP path is always: main app → HTTPS → dedicated SMTP
+worker → TCP 25 → recipient MX → evidence → main-app classification.
 
 Also not tracked by design: sender-specific **engagement** (opens/clicks) and
 **communication eligibility** (unsubscribes/suppression) — these depend on
